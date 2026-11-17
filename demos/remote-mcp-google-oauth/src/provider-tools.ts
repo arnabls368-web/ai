@@ -26,6 +26,14 @@ function failure(error: unknown) {
   return { isError: true, content: [{ type: "text" as const, text: error instanceof Error ? error.message : "Provider request failed." }] };
 }
 
+function trustedFalUrl(value: string): string {
+  const url = new URL(value);
+  if (url.protocol !== "https:" || url.hostname !== "queue.fal.run" || url.username || url.password) {
+    throw new Error("fal.ai returned an unexpected queue URL; refusing to fetch it.");
+  }
+  return url.toString();
+}
+
 async function providerJson(url: string, init: RequestInit, provider: string): Promise<any> {
   const response = await fetch(url, init);
   if (!response.ok) {
@@ -111,8 +119,8 @@ export function registerProviderTools(server: McpServer) {
         const record = {
           endpointId,
           requestId: submitted.request_id,
-          statusUrl: submitted.status_url,
-          responseUrl: submitted.response_url,
+          statusUrl: trustedFalUrl(submitted.status_url),
+          responseUrl: trustedFalUrl(submitted.response_url),
           createdAt: new Date().toISOString(),
         };
         await env.OAUTH_KV.put(`nexus:fal-jobs:v1:${scope}:${submitted.request_id}`, JSON.stringify(record), { expirationTtl: 60 * 60 * 24 * 7 });
