@@ -6,6 +6,7 @@ import { z } from "zod";
 import { GoogleHandler } from "./google-handler";
 import { refreshGoogleAccessToken } from "./utils";
 import { registerProductionTools } from "./production-tools";
+import { registerProviderTools } from "./provider-tools";
 
 export type Props = {
   name: string;
@@ -147,6 +148,7 @@ function createServer() {
   );
 
   registerProductionTools(server);
+  registerProviderTools(server);
   return server;
 }
 
