@@ -219,7 +219,7 @@ export function registerProductionTools(server: McpServer) {
           resolution: z.enum(["1080p", "720p"]).default("1080p"),
           frameRate: z.enum(["24", "25", "30", "60"]).default("30"),
           format: z.enum(["mp4"]).default("mp4"),
-        }).default({}),
+        }).default({ resolution: "1080p", frameRate: "30", format: "mp4" }),
       }),
     },
     async ({ projectId, expectedRevision, voiceoverAssetId, musicAssetId, sceneAssets, output }) => {
