@@ -1,0 +1,16 @@
+name = "phn-youtube-mcp"
+main = "src/index.ts"
+compatibility_date = "2026-11-17"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+[observability]
+enabled = true
+
+[vars]
+MCP_RESOURCE = "https://phn-youtube-mcp.arnabls368.workers.dev/mcp"
+HOSTED_DOMAIN = ""
+
+[[kv_namespaces]]
+binding = "OAUTH_KV"
+id = "eec4880e350447e5a5ca3fb5b53d7322"
