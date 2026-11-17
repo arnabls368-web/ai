@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, symlink, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, symlink, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { buildFfmpegArgs, validateManifest } from "../src/renderer.mjs";
@@ -52,7 +52,7 @@ test("builds FFmpeg arguments for image, video, voice and ducked music", async (
       a: "one.jpg", b: "two.mp4", voice: "voice.wav", music: "music.mp3"
     }, root, "/tmp/out.mp4");
     assert.ok(args.includes("libx264"));
-    assert.ok(args.includes("sidechaincompress=threshold=0.03:ratio=8:attack=20:release=250"));
+    assert.ok(args.join(" ").includes("sidechaincompress=threshold=0.03:ratio=8:attack=20:release=250"));
     assert.ok(args.includes("/tmp/out.mp4"));
   } finally {
     await rm(root, { recursive: true, force: true });
