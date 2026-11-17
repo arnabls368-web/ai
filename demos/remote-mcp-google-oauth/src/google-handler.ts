@@ -39,7 +39,7 @@ app.get("/authorize", async (c) => {
 		client: await c.env.OAUTH_PROVIDER.lookupClient(clientId),
 		csrfToken,
 		server: {
-			description: "Connect your Google account to upload finished videos privately to your YouTube channel.",
+			description: "Connect your Google account to manage private video uploads and read your YouTube channel and analytics data.",
 			name: "NEXUS Universe YouTube MCP",
 		},
 		setCookie,
@@ -112,7 +112,7 @@ async function redirectToGoogle(
 			clientId: env.GOOGLE_CLIENT_ID,
 			hostedDomain: env.HOSTED_DOMAIN,
 			redirectUri: new URL("/callback", request.url).href,
-			scope: "openid email profile https://www.googleapis.com/auth/youtube.upload",
+			scope: "openid email profile https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/yt-analytics.readonly",
 			state: stateToken,
 			upstreamUrl: "https://accounts.google.com/o/oauth2/v2/auth",
 		}),
