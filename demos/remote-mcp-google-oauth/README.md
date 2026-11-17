@@ -13,7 +13,11 @@ A remote MCP server that lets Claude and other MCP clients orchestrate a YouTube
 | `nexus_build_publish_package` | Drafts YouTube title, description and tags | Available |
 | `nexus_check_production_readiness` | Checks assets and explicit upload approval | Available |
 | `nexus_provider_status` | Reports configured and missing integrations | Available |
-| `youtube_upload_video` | Uploads a finished HTTPS video file to YouTube | Implemented; private only; 50 MB limit |
+| `nexus_create_project`, `nexus_list_projects`, `nexus_get_project`, `nexus_update_project` | Account-scoped saved project management | Available; KV-backed |
+| `youtube_get_channel_overview` | Reads channel identity and aggregate statistics | Available after OAuth reconnect |
+| `youtube_list_recent_videos` | Lists recent uploads and public video statistics | Available after OAuth reconnect |
+| `youtube_get_channel_analytics` | Reads daily channel performance metrics | Available after OAuth reconnect |
+| `youtube_upload_video` | Uploads a finished HTTPS video file to YouTube | Implemented; private only; 50 MB; explicit per-video approval |
 
 ## Not yet connected
 
@@ -33,7 +37,7 @@ Cloudflare Workers are used for orchestration and OAuth, not long-running video 
 
 1. **MCP client / agent:** Claude plans work and invokes tools.
 2. **Cloudflare Worker:** authenticates the MCP client and exposes tools at `/mcp`.
-3. **Google OAuth:** grants YouTube upload permission and stores refreshable authorization.
+3. **Google OAuth:** grants private-upload and read-only channel/analytics permissions and stores refreshable authorization.
 4. **Production workflow tools:** create briefs, storyboards, metadata drafts and readiness checks.
 5. **Provider adapters (next phase):** research, voice, image/video generation and rendering.
 6. **YouTube Data API:** uploads the final render as private content.
