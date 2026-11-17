@@ -88,7 +88,7 @@ app.post("/authorize", async (c) => {
 		headers.append("Set-Cookie", approvedClientCookie);
 		headers.append("Set-Cookie", sessionBindingCookie);
 
-		return redirectToGoogle(c.req.raw, c.env, stateToken, Object.fromEntries(headers));
+		return redirectToGoogle(c.req.raw, c.env, stateToken, headers);
 	} catch (error: any) {
 		console.error("POST /authorize error:", error);
 		if (error instanceof OAuthError) {
@@ -103,22 +103,21 @@ async function redirectToGoogle(
 	request: Request,
 	env: Env,
 	stateToken: string,
-	headers: Record<string, string> = {},
+	headers: HeadersInit = {},
 ) {
-	return new Response(null, {
-		headers: {
-			...headers,
-			location: getUpstreamAuthorizeUrl({
-				clientId: env.GOOGLE_CLIENT_ID,
-				hostedDomain: env.HOSTED_DOMAIN,
-				redirectUri: new URL("/callback", request.url).href,
-				scope: "openid email profile https://www.googleapis.com/auth/youtube.upload",
-				state: stateToken,
-				upstreamUrl: "https://accounts.google.com/o/oauth2/v2/auth",
-			}),
-		},
-		status: 302,
-	});
+	const responseHeaders = new Headers(headers);
+	responseHeaders.set(
+		"Location",
+		getUpstreamAuthorizeUrl({
+			clientId: env.GOOGLE_CLIENT_ID,
+			hostedDomain: env.HOSTED_DOMAIN,
+			redirectUri: new URL("/callback", request.url).href,
+			scope: "openid email profile https://www.googleapis.com/auth/youtube.upload",
+			state: stateToken,
+			upstreamUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+		}),
+	);
+	return new Response(null, { headers: responseHeaders, status: 302 });
 }
 
 /**
