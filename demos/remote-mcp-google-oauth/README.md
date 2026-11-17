@@ -114,5 +114,6 @@ Never merge the draft pull request or create a test upload without explicit user
 - Only public HTTPS video URLs are accepted.
 - The first implementation has a 50 MB file-size limit.
 - Video visibility is schema-locked to `private`.
+- Every upload requires explicit per-video user approval (`userApprovalConfirmed: true`).
 - The tool reports the returned YouTube video ID.
 - No video is uploaded during planning or readiness checks.
