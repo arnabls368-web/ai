@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { env } from "cloudflare:workers";
 import { getMcpAuthContext } from "agents/mcp/server";
+import { refreshGoogleAccessToken } from "./utils";
 
 const formats = ["long_form", "shorts", "tutorial", "documentary", "faceless"] as const;
 
@@ -12,6 +13,7 @@ const formats = ["long_form", "shorts", "tutorial", "documentary", "faceless"] a
  */
 export function registerProductionTools(server: McpServer) {
   registerProjectTools(server);
+  registerChannelTools(server);
 
   server.registerTool(
     "nexus_plan_video",
@@ -220,7 +222,9 @@ export function registerProductionTools(server: McpServer) {
             videoGeneration: "provider_not_configured",
             videoRenderingAndEditing: "render_service_not_configured",
             thumbnailGeneration: "provider_not_configured",
-            channelAnalyticsAndComments: "youtube_scopes_and_tools_not_implemented",
+            channelOverviewAndRecentVideos: "read_only_tools_implemented_requires_oauth_reconnect",
+            channelAnalytics: "read_only_tool_implemented_requires_oauth_reconnect",
+            commentsPlaylistsAndScheduling: "not_yet_implemented",
           },
           safety: {
             defaultVisibility: "private",
@@ -405,6 +409,172 @@ function registerProjectTools(server: McpServer) {
         };
         await env.OAUTH_KV.put(key, JSON.stringify(updated));
         return projectResult(updated);
+      } catch (error) {
+        return projectError(error);
+      }
+    },
+  );
+}
+
+
+type GoogleAuthProps = { accessToken?: string; refreshToken?: string };
+
+async function googleApiGet(url: string, auth: GoogleAuthProps): Promise<any> {
+  if (!auth.accessToken) throw new Error("Google account is not connected. Reconnect your account.");
+  const request = (token: string) => fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  let response = await request(auth.accessToken);
+  if (response.status === 401 && auth.refreshToken) {
+    const renewed = await refreshGoogleAccessToken(
+      auth.refreshToken,
+      env.GOOGLE_CLIENT_ID,
+      env.GOOGLE_CLIENT_SECRET,
+    );
+    if (!renewed) throw new Error("Google authorization expired. Reconnect your Google account and approve the requested read-only YouTube scopes.");
+    response = await request(renewed);
+  }
+  if (!response.ok) {
+    const detail = (await response.text()).slice(0, 300);
+    throw new Error(`Google API request failed (${response.status}): ${detail}`);
+  }
+  return response.json();
+}
+
+function registerChannelTools(server: McpServer) {
+  server.registerTool(
+    "youtube_get_channel_overview",
+    {
+      description: "Read the authenticated YouTube channel's identity, subscriber count, view count and video count. Requires YouTube read-only OAuth access.",
+      inputSchema: z.object({}),
+    },
+    async () => {
+      try {
+        const auth = getMcpAuthContext()?.props as GoogleAuthProps | undefined;
+        if (!auth) throw new Error("YouTube is not connected. Reconnect your Google account.");
+        const result = await googleApiGet(
+          "https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics,contentDetails&mine=true",
+          auth,
+        );
+        const channel = result.items?.[0];
+        if (!channel) throw new Error("No YouTube channel was returned for this Google account.");
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              channelId: channel.id,
+              title: channel.snippet?.title,
+              description: channel.snippet?.description,
+              customUrl: channel.snippet?.customUrl,
+              publishedAt: channel.snippet?.publishedAt,
+              thumbnails: channel.snippet?.thumbnails,
+              statistics: {
+                views: channel.statistics?.viewCount,
+                subscribers: channel.statistics?.subscriberCount,
+                hiddenSubscriberCount: channel.statistics?.hiddenSubscriberCount,
+                videos: channel.statistics?.videoCount,
+              },
+              uploadsPlaylistId: channel.contentDetails?.relatedPlaylists?.uploads,
+            }, null, 2),
+          }],
+        };
+      } catch (error) {
+        return projectError(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "youtube_list_recent_videos",
+    {
+      description: "List recent uploads from the authenticated YouTube channel with views, likes, comments and duration. Requires YouTube read-only OAuth access.",
+      inputSchema: z.object({ maxResults: z.number().int().min(1).max(25).default(10) }),
+    },
+    async ({ maxResults }) => {
+      try {
+        const auth = getMcpAuthContext()?.props as GoogleAuthProps | undefined;
+        if (!auth) throw new Error("YouTube is not connected. Reconnect your Google account.");
+        const channel = await googleApiGet(
+          "https://www.googleapis.com/youtube/v3/channels?part=contentDetails&mine=true",
+          auth,
+        );
+        const uploadsPlaylistId = channel.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
+        if (!uploadsPlaylistId) throw new Error("Could not find the channel uploads playlist.");
+        const playlistUrl = new URL("https://www.googleapis.com/youtube/v3/playlistItems");
+        playlistUrl.searchParams.set("part", "snippet,contentDetails");
+        playlistUrl.searchParams.set("playlistId", uploadsPlaylistId);
+        playlistUrl.searchParams.set("maxResults", String(maxResults));
+        const playlist = await googleApiGet(playlistUrl.toString(), auth);
+        const ids = (playlist.items ?? [])
+          .map((item: any) => item.contentDetails?.videoId)
+          .filter((id: unknown): id is string => typeof id === "string");
+        if (!ids.length) {
+          return { content: [{ type: "text" as const, text: JSON.stringify({ videos: [], returned: 0 }) }] };
+        }
+        const videosUrl = new URL("https://www.googleapis.com/youtube/v3/videos");
+        videosUrl.searchParams.set("part", "snippet,statistics,contentDetails");
+        videosUrl.searchParams.set("id", ids.join(","));
+        const videos = await googleApiGet(videosUrl.toString(), auth);
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              videos: (videos.items ?? []).map((video: any) => ({
+                videoId: video.id,
+                title: video.snippet?.title,
+                description: video.snippet?.description,
+                publishedAt: video.snippet?.publishedAt,
+                thumbnail: video.snippet?.thumbnails?.high?.url ?? video.snippet?.thumbnails?.default?.url,
+                duration: video.contentDetails?.duration,
+                statistics: {
+                  views: video.statistics?.viewCount,
+                  likes: video.statistics?.likeCount,
+                  comments: video.statistics?.commentCount,
+                },
+              })),
+              returned: videos.items?.length ?? 0,
+            }, null, 2),
+          }],
+        };
+      } catch (error) {
+        return projectError(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "youtube_get_channel_analytics",
+    {
+      description: "Read daily channel performance metrics for a date range. Requires YouTube Analytics read-only OAuth access.",
+      inputSchema: z.object({
+        startDate: z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/),
+        endDate: z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/),
+      }),
+    },
+    async ({ startDate, endDate }) => {
+      try {
+        if (startDate > endDate) throw new Error("startDate must be on or before endDate.");
+        const auth = getMcpAuthContext()?.props as GoogleAuthProps | undefined;
+        if (!auth) throw new Error("YouTube is not connected. Reconnect your Google account.");
+        const analyticsUrl = new URL("https://youtubeanalytics.googleapis.com/v2/reports");
+        analyticsUrl.searchParams.set("ids", "channel==MINE");
+        analyticsUrl.searchParams.set("startDate", startDate);
+        analyticsUrl.searchParams.set("endDate", endDate);
+        analyticsUrl.searchParams.set("metrics", "views,estimatedMinutesWatched,averageViewDuration,subscribersGained,subscribersLost");
+        analyticsUrl.searchParams.set("dimensions", "day");
+        analyticsUrl.searchParams.set("sort", "day");
+        const report = await googleApiGet(analyticsUrl.toString(), auth);
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              columnHeaders: report.columnHeaders,
+              rows: report.rows ?? [],
+              startDate,
+              endDate,
+            }, null, 2),
+          }],
+        };
       } catch (error) {
         return projectError(error);
       }
