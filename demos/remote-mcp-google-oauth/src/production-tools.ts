@@ -87,9 +87,7 @@ export function registerProductionTools(server: McpServer) {
         const start = Math.floor((index * sentences.length) / sceneCount);
         const end = Math.floor(((index + 1) * sentences.length) / sceneCount);
         const narration = sentences.slice(start, Math.max(start + 1, end)).join(" ").trim();
-        const duration = index === sceneCount - 1
-          ? targetDurationSeconds - maxSceneSeconds * (sceneCount - 1)
-          : Math.min(maxSceneSeconds, targetDurationSeconds - maxSceneSeconds * (sceneCount - 1) + maxSceneSeconds);
+        const duration = Math.min(maxSceneSeconds, targetDurationSeconds - index * maxSceneSeconds);
         return {
           scene: index + 1,
           startSeconds: index * maxSceneSeconds,
