@@ -1,0 +1,32 @@
+name: NEXUS FFmpeg renderer
+
+on:
+  pull_request:
+    paths:
+      - "demos/nexus-ffmpeg-renderer/**"
+      - ".github/workflows/nexus-ffmpeg-renderer.yml"
+  push:
+    branches:
+      - main
+      - feature/youtube-upload-mcp
+    paths:
+      - "demos/nexus-ffmpeg-renderer/**"
+      - ".github/workflows/nexus-ffmpeg-renderer.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  renderer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run renderer unit tests
+        run: node --test demos/nexus-ffmpeg-renderer/test/*.test.mjs
+      - name: Build renderer container
+        run: docker build -t nexus-ffmpeg-renderer demos/nexus-ffmpeg-renderer
