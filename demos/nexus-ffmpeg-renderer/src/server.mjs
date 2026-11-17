@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { createReadStream } from "node:fs";
-import { mkdir, writeFile, stat } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { renderManifest } from "./renderer.mjs";
@@ -154,7 +154,10 @@ export function createRenderJobServer({
       return createReadStream(job.outputPath).pipe(response);
     }
     if (request.method === "GET" && !match[2]) {
-      const { manifest, assetMap, outputPath, ...publicJob } = job;
+      const publicJob = { ...job };
+      delete publicJob.manifest;
+      delete publicJob.assetMap;
+      delete publicJob.outputPath;
       return json(response, 200, {
         ...publicJob,
         ...(job.status === "succeeded" ? { outputUrl: `/jobs/${job.id}/output` } : {}),
