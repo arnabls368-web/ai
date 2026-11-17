@@ -959,7 +959,7 @@ importers:
         specifier: 6.0.3
         version: 6.0.3
       wrangler:
-        specifier: ^4.105.0
+        specifier: 4.105.0
         version: 4.105.0(@cloudflare/workers-types@4.20260628.1)(bufferutil@4.0.9)(utf-8-validate@5.0.10)
 
   demos/remote-mcp-logto:
