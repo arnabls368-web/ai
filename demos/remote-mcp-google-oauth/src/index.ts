@@ -18,7 +18,7 @@ async function uploadToYouTube(
   mimeType: string,
   title: string,
   description: string,
-  privacyStatus: "private" | "unlisted" | "public",
+  privacyStatus: "private",
   initialAccessToken: string,
   refreshToken?: string,
 ): Promise<{ videoId: string; privacyStatus: string }> {
@@ -50,7 +50,6 @@ async function uploadToYouTube(
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": mimeType,
-        "Content-Length": String(videoBytes.byteLength),
       },
       body: videoBytes,
     });
@@ -91,7 +90,7 @@ function createServer() {
         videoUrl: z.string().url().describe("Direct HTTPS URL to the finished video file"),
         title: z.string().min(1).max(100),
         description: z.string().max(5000).optional(),
-        privacyStatus: z.enum(["private", "unlisted", "public"]).default("private"),
+        privacyStatus: z.literal("private").default("private"),
       }),
     },
     async ({ videoUrl, title, description, privacyStatus }) => {
@@ -106,12 +105,12 @@ function createServer() {
       } catch {
         return { isError: true, content: [{ type: "text", text: "Invalid video URL." }] };
       }
-      if (parsedUrl.protocol !== "https:" || ["localhost", "127.0.0.1", "::1"].includes(parsedUrl.hostname)) {
+      if (parsedUrl.protocol !== "https:" || parsedUrl.username || parsedUrl.password || parsedUrl.hostname === "localhost" || parsedUrl.hostname.endsWith(".localhost") || parsedUrl.hostname.endsWith(".local") || parsedUrl.hostname === "metadata.google.internal" || /^127\./.test(parsedUrl.hostname) || /^10\./.test(parsedUrl.hostname) || /^192\.168\./.test(parsedUrl.hostname) || /^169\.254\./.test(parsedUrl.hostname) || /^172\.(1[6-9]|2\d|3[01])\./.test(parsedUrl.hostname) || parsedUrl.hostname === "::1" || parsedUrl.hostname.startsWith("[")) {
         return { isError: true, content: [{ type: "text", text: "Use a public HTTPS video URL." }] };
       }
 
       try {
-        const source = await fetch(parsedUrl.toString(), { redirect: "follow" });
+        const source = await fetch(parsedUrl.toString(), { redirect: "error" });
         if (!source.ok) throw new Error(`Could not download video (HTTP ${source.status})`);
         const mimeType = (source.headers.get("Content-Type") || "").split(";")[0].trim();
         if (!mimeType.startsWith("video/")) throw new Error("The URL must return a video file.");
