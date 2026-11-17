@@ -29,7 +29,7 @@ The following require separate provider adapters and credentials; the MCP server
 - AI script and fact-checking provider
 - Text-to-speech / voice generation
 - Image and video generation
-- Video rendering/editing service (FFmpeg or a hosted render worker); the MCP now prepares a persistent render manifest, but does not execute it
+- The standalone `demos/nexus-ffmpeg-renderer` package now renders the NEXUS manifest locally/in Docker using FFmpeg (image/video scenes, voiceover, music ducking and MP4 export); it is a CLI engine, not yet a hosted job API or connected to R2
 - Thumbnail generation
 - YouTube comments, playlists and scheduling
 
