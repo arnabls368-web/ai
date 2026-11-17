@@ -171,7 +171,7 @@ app.get("/callback", async (c) => {
 		code,
 		grantType: "authorization_code",
 		redirectUri: new URL("/callback", c.req.url).href,
-		upstreamUrl: "https://accounts.google.com/o/oauth2/token",
+		upstreamUrl: "https://oauth2.googleapis.com/token",
 	});
 	if (googleErrResponse) {
 		return googleErrResponse;
