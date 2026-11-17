@@ -1,55 +1,137 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { createRenderJobServer } from "../src/server.mjs";
 
-async function withServer(run) {
+const TOKEN = "test-token-that-is-at-least-32-characters-long";
+
+async function startServer(workRoot) {
   const server = createRenderJobServer({
-    token: "test-token-that-is-at-least-32-characters-long",
-    assetRoot: "/tmp/nexus-test-assets",
-    workRoot: "/tmp/nexus-test-work",
+    token: TOKEN,
+    assetRoot: path.join(workRoot, "assets"),
+    workRoot,
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
+  return {
+    base: `http://127.0.0.1:${address.port}`,
+    close: () => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
+  };
+}
+
+async function withWorkRoot(run) {
+  const workRoot = await mkdtemp(path.join(os.tmpdir(), "nexus-render-test-"));
   try {
-    await run(`http://127.0.0.1:${address.port}`);
+    await run(workRoot);
   } finally {
-    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(workRoot, { recursive: true, force: true });
   }
 }
 
-test("health endpoint is available without credentials", async () => {
-  await withServer(async (base) => {
-    const response = await fetch(`${base}/health`);
+async function waitForFailedJob(base, id) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const response = await fetch(`${base}/jobs/${id}`, {
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
     assert.equal(response.status, 200);
-    assert.equal((await response.json()).service, "nexus-render-jobs");
+    const job = await response.json();
+    if (job.status === "failed") return job;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Render job did not reach a terminal state in time.");
+}
+
+test("health endpoint is available without credentials", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const server = await startServer(workRoot);
+    try {
+      const response = await fetch(`${server.base}/health`);
+      assert.equal(response.status, 200);
+      const result = await response.json();
+      assert.equal(result.service, "nexus-render-jobs");
+      assert.equal(result.persistence, "filesystem");
+    } finally {
+      await server.close();
+    }
   });
 });
 
-test("job API rejects missing or invalid bearer credentials", async () => {
-  await withServer(async (base) => {
-    const response = await fetch(`${base}/jobs`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ manifest: {}, assetMap: {} }),
-    });
-    assert.equal(response.status, 401);
+test("job API rejects missing bearer credentials", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const server = await startServer(workRoot);
+    try {
+      const response = await fetch(`${server.base}/jobs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ manifest: {}, assetMap: {} }),
+      });
+      assert.equal(response.status, 401);
+    } finally {
+      await server.close();
+    }
   });
 });
 
 test("authenticated job submission returns an opaque job ID", async () => {
-  await withServer(async (base) => {
-    const response = await fetch(`${base}/jobs`, {
-      method: "POST",
-      headers: {
-        authorization: "Bearer test-token-that-is-at-least-32-characters-long",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ manifest: {}, assetMap: {} }),
-    });
-    assert.equal(response.status, 202);
-    const result = await response.json();
-    assert.match(result.id, /^[0-9a-f-]{36}$/i);
-    assert.ok(["queued", "running"].includes(result.status));
-    assert.equal(result.statusUrl, `/jobs/${result.id}`);
+  await withWorkRoot(async (workRoot) => {
+    const server = await startServer(workRoot);
+    try {
+      const response = await fetch(`${server.base}/jobs`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${TOKEN}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ manifest: {}, assetMap: {} }),
+      });
+      assert.equal(response.status, 202);
+      const result = await response.json();
+      assert.match(result.id, /^[0-9a-f-]{36}$/i);
+      assert.ok(["queued", "running"].includes(result.status));
+      assert.equal(result.statusUrl, `/jobs/${result.id}`);
+      await waitForFailedJob(server.base, result.id);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("job status survives a render-service restart", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const first = await startServer(workRoot);
+    let jobId;
+    try {
+      const response = await fetch(`${first.base}/jobs`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${TOKEN}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ manifest: {}, assetMap: {} }),
+      });
+      assert.equal(response.status, 202);
+      jobId = (await response.json()).id;
+      await waitForFailedJob(first.base, jobId);
+    } finally {
+      await first.close();
+    }
+
+    const restarted = await startServer(workRoot);
+    try {
+      const response = await fetch(`${restarted.base}/jobs/${jobId}`, {
+        headers: { authorization: `Bearer ${TOKEN}` },
+      });
+      assert.equal(response.status, 200);
+      const job = await response.json();
+      assert.equal(job.id, jobId);
+      assert.equal(job.status, "failed");
+      assert.match(job.error, /manifest/i);
+      assert.equal("manifest" in job, false);
+      assert.equal("assetMap" in job, false);
+    } finally {
+      await restarted.close();
+    }
   });
 });
