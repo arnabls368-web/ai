@@ -46,7 +46,6 @@ export function registerProductionTools(server: McpServer) {
         createdAt: now,
         updatedAt: now,
       };
-      await env.OAUTH_KV.put(projectKey(owner, projectId), JSON.stringify(project));
       const stages = [
         { id: "research", label: "Research and fact-check", status: "planned" },
         { id: "script", label: "Write hook, script and CTA", status: "planned" },
@@ -202,6 +201,102 @@ export function registerProductionTools(server: McpServer) {
   );
 
   server.registerTool(
+    "nexus_create_render_manifest",
+    {
+      description:
+        "Create and persist a renderer-neutral edit manifest from a saved storyboard and generated asset IDs. This prepares an FFmpeg render job specification; it does not render media or fetch assets.",
+      inputSchema: z.object({
+        projectId: z.string().uuid(),
+        expectedRevision: z.number().int().positive(),
+        voiceoverAssetId: z.string().min(1).max(200).optional(),
+        musicAssetId: z.string().min(1).max(200).optional(),
+        sceneAssets: z.array(z.object({
+          scene: z.number().int().positive(),
+          assetId: z.string().min(1).max(200),
+          fit: z.enum(["cover", "contain"]).default("cover"),
+        })).min(1).max(500),
+        output: z.object({
+          resolution: z.enum(["1080p", "720p"]).default("1080p"),
+          frameRate: z.enum(["24", "25", "30", "60"]).default("30"),
+          format: z.enum(["mp4"]).default("mp4"),
+        }).default({}),
+      }),
+    },
+    async ({ projectId, expectedRevision, voiceoverAssetId, musicAssetId, sceneAssets, output }) => {
+      try {
+        const owner = await getProjectScope();
+        const key = projectKey(owner, projectId);
+        const project = await env.OAUTH_KV.get<NexusProject>(key, "json");
+        if (!project) throw new Error("Project not found for this account.");
+        if (project.revision !== expectedRevision) {
+          throw new Error(`Revision conflict: current revision is ${project.revision}. Fetch the project again before creating a render manifest.`);
+        }
+        if (!project.storyboard) throw new Error("Create and save a storyboard before preparing a render manifest.");
+        const storyboardScenes = project.storyboard.scenes;
+        const assetByScene = new Map<number, { assetId: string; fit: "cover" | "contain" }>();
+        for (const asset of sceneAssets) {
+          if (assetByScene.has(asset.scene)) throw new Error(`Duplicate asset mapping for scene ${asset.scene}.`);
+          assetByScene.set(asset.scene, { assetId: asset.assetId, fit: asset.fit });
+        }
+        const missing = storyboardScenes
+          .filter((scene) => !assetByScene.has(scene.scene))
+          .map((scene) => scene.scene);
+        const extra = [...assetByScene.keys()].filter((scene) => !storyboardScenes.some((item) => item.scene === scene));
+        if (missing.length || extra.length) {
+          throw new Error(`Asset mapping must match storyboard scenes exactly. Missing scenes: ${missing.join(", ") || "none"}; unknown scenes: ${extra.join(", ") || "none"}.`);
+        }
+        const manifest = {
+          version: 1,
+          renderer: "ffmpeg",
+          projectId,
+          createdAt: new Date().toISOString(),
+          aspectRatio: project.storyboard.aspectRatio,
+          durationSeconds: project.storyboard.targetDurationSeconds,
+          output,
+          tracks: {
+            video: storyboardScenes.map((scene) => ({
+              scene: scene.scene,
+              startSeconds: scene.startSeconds,
+              durationSeconds: scene.durationSeconds,
+              assetId: assetByScene.get(scene.scene)!.assetId,
+              fit: assetByScene.get(scene.scene)!.fit,
+              transitionOut: "cut",
+            })),
+            ...(voiceoverAssetId ? { voiceover: { assetId: voiceoverAssetId, startSeconds: 0 } } : {}),
+            ...(musicAssetId ? { music: { assetId: musicAssetId, startSeconds: 0, gain: 0.12, duckUnderVoiceover: true } } : {}),
+          },
+          safety: {
+            publicPublishingEnabled: false,
+            renderOnly: true,
+            externalUrlsFetchedByWorker: false,
+          },
+        };
+        const updated: NexusProject = {
+          ...project,
+          renderManifest: manifest,
+          revision: project.revision + 1,
+          updatedAt: new Date().toISOString(),
+        };
+        await env.OAUTH_KV.put(key, JSON.stringify(updated));
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              status: "render_manifest_created",
+              executionMode: "manifest_only",
+              manifest,
+              projectRevision: updated.revision,
+              note: "A separate render service must resolve asset IDs from trusted storage and execute FFmpeg. No media was rendered or uploaded.",
+            }, null, 2),
+          }],
+        };
+      } catch (error) {
+        return projectError(error);
+      }
+    },
+  );
+
+  server.registerTool(
     "nexus_check_production_readiness",
     {
       description:
@@ -314,6 +409,7 @@ type NexusProject = {
     }>;
   };
   publishPackage?: { title: string; description: string; tags: string[] };
+  renderManifest?: Record<string, unknown>;
 };
 
 async function getProjectScope(): Promise<string> {
