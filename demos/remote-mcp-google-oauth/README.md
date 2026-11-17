@@ -115,6 +115,28 @@ The GitHub Actions workflow builds the Worker bundle and deploys only when the r
 
 Never merge the draft pull request or create a test upload without explicit user approval. Verify the deployed `/mcp` endpoint and list tools with MCP Inspector before considering deployment complete.
 
+
+## Connect vidIQ to Claude alongside NEXUS
+
+vidIQ provides its own hosted remote MCP endpoint at `https://mcp.vidiq.com/mcp`. It is best connected directly in Claude as a second MCP server rather than copying the ChatGPT vidIQ connection into this Worker. Sign in through vidIQ's OAuth flow in Claude to enable the tools and approval-gated channel edits. Read-only API keys are also available from vidIQ account MCP settings for clients that cannot complete browser sign-in. Tool usage consumes the vidIQ plan's shared credits. See the [official vidIQ MCP setup guide](https://vidiq.com/mcp/).
+
+Example remote MCP entry (use Claude's custom connector UI where available):
+
+```json
+{
+  "mcpServers": {
+    "nexus-youtube": {
+      "url": "https://phn-youtube-mcp.arnabls368.workers.dev/mcp"
+    },
+    "vidiq": {
+      "url": "https://mcp.vidiq.com/mcp"
+    }
+  }
+}
+```
+
+The two MCP servers remain separate: NEXUS handles workflow orchestration and media production; vidIQ supplies creator intelligence. Claude can use both in the same conversation.
+
 ## Upload behavior
 
 - Only public HTTPS video URLs are accepted.
