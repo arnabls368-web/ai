@@ -14,6 +14,9 @@ A remote MCP server that lets Claude and other MCP clients orchestrate a YouTube
 | `nexus_check_production_readiness` | Checks assets and explicit upload approval | Available |
 | `nexus_provider_status` | Reports configured and missing integrations | Available |
 | `nexus_create_project`, `nexus_list_projects`, `nexus_get_project`, `nexus_update_project` | Account-scoped saved project management | Available; KV-backed |
+| `nexus_update_project_stage` | Persist production-stage progress with revision checks | Available; KV-backed |
+| `nexus_create_storyboard` | Create timed scenes and optionally save them to a project | Available; planning only |
+| `nexus_build_publish_package` | Draft metadata and optionally save it to a project | Available; planning only |
 | `youtube_get_channel_overview` | Reads channel identity and aggregate statistics | Available after OAuth reconnect |
 | `youtube_list_recent_videos` | Lists recent uploads and public video statistics | Available after OAuth reconnect |
 | `youtube_get_channel_analytics` | Reads daily channel performance metrics | Available after OAuth reconnect |
@@ -42,7 +45,7 @@ Cloudflare Workers are used for orchestration and OAuth, not long-running video 
 5. **Provider adapters (next phase):** research, voice, image/video generation and rendering.
 6. **YouTube Data API:** uploads the final render as private content.
 
-Project records are currently persisted under a dedicated `nexus:projects:v1:` key prefix in the existing KV namespace, scoped by a SHA-256 hash of the authenticated Google email. OAuth provider keys are not modified. KV is inexpensive and suitable for this initial low-volume project registry, but it is eventually consistent and does not provide transactional compare-and-swap; migrate to D1 before adding concurrent collaborators or stronger transactional guarantees. Each production job should eventually track stage status, retry information, asset references, cost estimates and an approval audit trail.
+Video briefs, workflow stages, storyboards and metadata drafts can be persisted on each project. Project records are currently persisted under a dedicated `nexus:projects:v1:` key prefix in the existing KV namespace, scoped by a SHA-256 hash of the authenticated Google email. OAuth provider keys are not modified. KV is inexpensive and suitable for this initial low-volume project registry, but it is eventually consistent and does not provide transactional compare-and-swap; migrate to D1 before adding concurrent collaborators or stronger transactional guarantees. Each production job should eventually track stage status, retry information, asset references, cost estimates and an approval audit trail.
 
 ## Local development
 
