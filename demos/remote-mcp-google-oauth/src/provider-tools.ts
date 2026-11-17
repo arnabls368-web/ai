@@ -72,7 +72,7 @@ export function registerProviderTools(server: McpServer) {
         if (excludeDomains?.length) body.excludeDomains = excludeDomains;
         const data = await providerJson("https://api.exa.ai/search", {
           method: "POST",
-          headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+          headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", "Exa-Beta": "dynamic-highlights-2026-08-28" },
           body: JSON.stringify(body),
         }, "Exa");
         return result({
