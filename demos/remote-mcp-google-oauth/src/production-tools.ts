@@ -30,7 +30,23 @@ export function registerProductionTools(server: McpServer) {
       }),
     },
     async (input) => {
+      const owner = await getProjectScope();
+      const now = new Date().toISOString();
       const projectId = crypto.randomUUID();
+      const project: NexusProject = {
+        id: projectId,
+        name: input.concept.trim().slice(0, 96),
+        concept: input.concept,
+        audience: input.audience,
+        format: input.format,
+        targetDurationMinutes: input.targetDurationMinutes,
+        status: "idea",
+        notes: [`Tone: ${input.tone}`, `Objective: ${input.objective}`],
+        revision: 1,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await env.OAUTH_KV.put(projectKey(owner, projectId), JSON.stringify(project));
       const stages = [
         { id: "research", label: "Research and fact-check", status: "planned" },
         { id: "script", label: "Write hook, script and CTA", status: "planned" },
