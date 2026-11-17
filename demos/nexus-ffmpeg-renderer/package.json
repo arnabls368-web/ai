@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "render": "node src/cli.mjs",
-    "test": "node --test"
+    "test": "node --test",
+    "serve": "node src/server.mjs"
   },
   "engines": {
     "node": ">=22"
