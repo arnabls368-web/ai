@@ -10,4 +10,6 @@ COPY src ./src
 COPY test ./test
 
 ENV NODE_ENV=production
-ENTRYPOINT ["node", "src/cli.mjs"]
+EXPOSE 8080
+ENTRYPOINT ["node"]
+CMD ["src/cli.mjs"]
