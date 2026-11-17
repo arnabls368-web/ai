@@ -5,6 +5,7 @@ import { createMcpHandler, getMcpAuthContext } from "agents/mcp/server";
 import { z } from "zod";
 import { GoogleHandler } from "./google-handler";
 import { refreshGoogleAccessToken } from "./utils";
+import { registerProductionTools } from "./production-tools";
 
 export type Props = {
   name: string;
@@ -77,8 +78,8 @@ async function uploadToYouTube(
 
 function createServer() {
   const server = new McpServer({
-    name: "YouTube Upload MCP",
-    version: "1.0.0",
+    name: "NEXUS Universe YouTube Automation MCP",
+    version: "1.1.0",
   });
 
   server.registerTool(
@@ -141,6 +142,7 @@ function createServer() {
     },
   );
 
+  registerProductionTools(server);
   return server;
 }
 
