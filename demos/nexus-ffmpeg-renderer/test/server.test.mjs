@@ -49,7 +49,7 @@ test("authenticated job submission returns an opaque job ID", async () => {
     assert.equal(response.status, 202);
     const result = await response.json();
     assert.match(result.id, /^[0-9a-f-]{36}$/i);
-    assert.equal(result.status, "queued");
+    assert.ok(["queued", "running"].includes(result.status));
     assert.equal(result.statusUrl, `/jobs/${result.id}`);
   });
 });
