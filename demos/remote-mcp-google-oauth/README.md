@@ -12,11 +12,10 @@ A remote MCP server that lets Claude and other MCP clients orchestrate a YouTube
 | `nexus_create_storyboard` | Converts a script into timed scenes and visual prompts | Available; planning only |
 | `nexus_build_publish_package` | Drafts YouTube title, description and tags | Available |
 | `nexus_check_production_readiness` | Checks assets and explicit upload approval | Available |
+| `nexus_create_render_manifest` | Creates and persists a renderer-neutral FFmpeg edit manifest from storyboard and asset IDs | Available; manifest only |
 | `nexus_provider_status` | Reports configured and missing integrations | Available |
 | `nexus_create_project`, `nexus_list_projects`, `nexus_get_project`, `nexus_update_project` | Account-scoped saved project management | Available; KV-backed |
 | `nexus_update_project_stage` | Persist production-stage progress with revision checks | Available; KV-backed |
-| `nexus_create_storyboard` | Create timed scenes and optionally save them to a project | Available; planning only |
-| `nexus_build_publish_package` | Draft metadata and optionally save it to a project | Available; planning only |
 | `youtube_get_channel_overview` | Reads channel identity and aggregate statistics | Available after OAuth reconnect |
 | `youtube_list_recent_videos` | Lists recent uploads and public video statistics | Available after OAuth reconnect |
 | `youtube_get_channel_analytics` | Reads daily channel performance metrics | Available after OAuth reconnect |
@@ -30,7 +29,7 @@ The following require separate provider adapters and credentials; the MCP server
 - AI script and fact-checking provider
 - Text-to-speech / voice generation
 - Image and video generation
-- Video rendering/editing service (FFmpeg or a hosted render worker)
+- Video rendering/editing service (FFmpeg or a hosted render worker); the MCP now prepares a persistent render manifest, but does not execute it
 - Thumbnail generation
 - YouTube comments, playlists and scheduling
 
