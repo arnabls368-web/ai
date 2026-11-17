@@ -361,7 +361,7 @@ export function registerProductionTools(server: McpServer) {
             imageGeneration: "provider_not_configured",
             videoGeneration: "provider_not_configured",
             renderManifestPreparation: "available_manifest_only",
-            videoRenderingAndEditing: "render_service_not_configured",
+            videoRenderingAndEditing: "local_container_job_api_prototype_not_connected_to_worker_or_r2",
             thumbnailGeneration: "provider_not_configured",
             channelOverviewAndRecentVideos: "read_only_tools_implemented_requires_oauth_reconnect",
             channelAnalytics: "read_only_tool_implemented_requires_oauth_reconnect",
