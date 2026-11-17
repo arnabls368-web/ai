@@ -112,7 +112,6 @@ export function createRenderJobServer({
         if (!record || record.id !== entry.name || !["queued", "running", "succeeded", "failed"].includes(record.status)) continue;
         const job = { ...record };
         if (job.status === "running" || job.status === "queued") {
-          // Re-render to the fixed output path if the process stopped mid-job.
           job.status = "queued";
           delete job.startedAt;
           delete job.error;
@@ -177,7 +176,9 @@ export function createRenderJobServer({
   function pump() {
     while (active < maxConcurrent && queue.length) {
       const next = queue.shift();
-      void execute(next);
+      void execute(next).catch((error) => {
+        process.stderr.write(`NEXUS render job persistence error: ${String(error?.message ?? error)}\\n`);
+      });
     }
   }
 
@@ -248,7 +249,9 @@ export function createRenderJobServer({
   });
 
   server.once("listening", () => {
-    void ready.then(pump);
+    void ready.then(pump).catch((error) => {
+      process.stderr.write(`NEXUS render queue recovery error: ${String(error?.message ?? error)}\\n`);
+    });
   });
   return server;
 }
