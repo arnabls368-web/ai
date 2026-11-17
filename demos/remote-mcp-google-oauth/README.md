@@ -83,7 +83,7 @@ Google OAuth requests these scopes:
 
 Existing authorizations do not gain new scopes automatically. Reconnect the Google account and approve the expanded read-only permissions before using channel insights tools.
 
-The Google OAuth web client must include this redirect URI:
+Set these additional Worker secrets in Cloudflare (never commit or paste their values into chat):\n\n- `EXA_API_KEY` — Exa Search API key for `nexus_research_web`.\n- `FAL_KEY` — fal.ai API key for media generation and job polling.\n\nThe fal generation tool requires `userApprovedGeneration: true` for each paid request. fal model charges vary by endpoint and settings; inspect the model schema and pricing before submitting. Generated assets are not automatically copied into R2 yet. Job tracking metadata is stored in the existing KV namespace, scoped to the authenticated account.\n\nThe Google OAuth web client must include this redirect URI:
 
 `https://phn-youtube-mcp.arnabls368.workers.dev/callback`
 
