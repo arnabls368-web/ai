@@ -38,7 +38,7 @@ Cloudflare Workers are used for orchestration and OAuth, not long-running video 
 5. **Provider adapters (next phase):** research, voice, image/video generation and rendering.
 6. **YouTube Data API:** uploads the final render as private content.
 
-Projects should eventually be persisted in a dedicated application-data store, separate from OAuth state. Each production job should have an ID, stage status, retry information, asset references, cost estimates and an approval audit trail.
+Project records are currently persisted under a dedicated `nexus:projects:v1:` key prefix in the existing KV namespace, scoped by a SHA-256 hash of the authenticated Google email. OAuth provider keys are not modified. KV is inexpensive and suitable for this initial low-volume project registry, but it is eventually consistent and does not provide transactional compare-and-swap; migrate to D1 before adding concurrent collaborators or stronger transactional guarantees. Each production job should eventually track stage status, retry information, asset references, cost estimates and an approval audit trail.
 
 ## Local development
 
