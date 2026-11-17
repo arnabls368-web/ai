@@ -29,11 +29,11 @@ The following require separate provider adapters and credentials; the MCP server
 - AI script and fact-checking provider
 - Text-to-speech / voice generation
 - Image and video generation
-- The standalone `demos/nexus-ffmpeg-renderer` package now renders the NEXUS manifest locally/in Docker using FFmpeg (image/video scenes, voiceover, music ducking and MP4 export); it is a CLI engine, not yet a hosted job API or connected to R2
+- The standalone `demos/nexus-ffmpeg-renderer` package renders NEXUS manifests locally/in Docker using FFmpeg and now includes an authenticated single-process render-job API prototype (`POST /jobs`, status polling and MP4 retrieval). The prototype uses in-memory job state and pre-mounted local assets; it is not durable, not tenant-isolated, and not yet connected to R2 or the Worker
 - Thumbnail generation
 - YouTube comments, playlists and scheduling
 
-Cloudflare Workers are used for orchestration and OAuth, not long-running video rendering. Heavy media processing should run in a dedicated render service or container and return a finished file URL for the uploader.
+Cloudflare Workers are used for orchestration and OAuth, not long-running video rendering. Heavy media processing runs in a dedicated render service or container and returns a finished file for the uploader. The current job API is a prototype only; production still needs durable queue/state, trusted R2 asset storage, per-user authorization, retries, callbacks and cleanup.
 
 ## Architecture
 
