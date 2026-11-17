@@ -44,8 +44,34 @@ docker run --rm -v "$PWD/render-input:/input" -v "$PWD/render-output:/output" \
   nexus-ffmpeg-renderer /input/manifest.json /input/asset-map.json /input/assets /output/final.mp4
 ```
 
+## Authenticated render-job API prototype
+
+The package also includes a small Node HTTP wrapper for a **single-process prototype**. It accepts a manifest and asset-ID map, queues a render, exposes job status, and streams the completed MP4. It never accepts remote asset URLs: assets must already exist under the server's configured local asset directory.
+
+```bash
+# Generate a strong bearer token outside the repository.
+export NEXUS_RENDER_TOKEN="$(openssl rand -hex 32)"
+docker build -t nexus-ffmpeg-renderer demos/nexus-ffmpeg-renderer
+mkdir -p ./render-assets ./render-work
+docker run --rm -p 8080:8080 \
+  -e NEXUS_RENDER_TOKEN \
+  -e NEXUS_ASSET_ROOT=/assets \
+  -e NEXUS_RENDER_WORKDIR=/work \
+  -v "$PWD/render-assets:/assets:ro" \
+  -v "$PWD/render-work:/work" \
+  nexus-ffmpeg-renderer src/server.mjs
+```
+
+- `GET /health` — health check.
+- `POST /jobs` — authenticated JSON body: `{"manifest":{...},"assetMap":{"asset-id":"file.png"}}`; returns HTTP 202 and a job ID.
+- `GET /jobs/:id` — authenticated job status.
+- `GET /jobs/:id/output` — authenticated MP4 download after success.
+
+Send `Authorization: Bearer <NEXUS_RENDER_TOKEN>` for job routes. The API limits request bodies to 1 MiB, keeps a small in-process queue, runs at most one render by default, and bounds the retained job list. Do not put the token in source control or logs.
+
+**Important prototype limits:** job state and queue are in memory and disappear on restart; jobs are not tenant-isolated beyond the single shared bearer token; there is no R2 integration, persistent queue, retry policy, cancellation, or callback to the Worker. Mount a trusted asset directory read-only. Do not expose this prototype publicly or treat it as production-ready. A production deployment needs durable job state/queue, per-user authorization, R2 object ownership checks, lifecycle cleanup, retries/idempotency, observability and authenticated callbacks.
 ## Deliberate boundaries
 
-This is the rendering engine/CLI, not yet a hosted job API. It does not download arbitrary URLs, accept public network requests, access R2 credentials, store jobs, or upload to YouTube. A future authenticated job service should resolve asset IDs from trusted R2 storage, create local input files, call this engine, upload the result to R2 and report job state back to NEXUS. Do not expose this CLI directly to untrusted users.
+The CLI is the rendering engine. The included authenticated HTTP wrapper is an early single-process job API prototype, not the durable hosted service. Neither component downloads arbitrary URLs, accesses R2 credentials, or uploads to YouTube. A production service must resolve asset IDs from trusted R2 storage, persist job state, call this engine, upload results to R2 and report job state back to NEXUS.
 
 No paid service or Cloudflare resource is created by this package.
