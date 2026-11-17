@@ -342,7 +342,7 @@ function registerProjectTools(server: McpServer) {
             text: JSON.stringify({
               projects,
               returned: projects.length,
-              truncated: !listed.list_complete || records.length > projects.length,
+              truncated: !listed.list_complete || listed.keys.length >= 1000 || projects.length === limit,
               storage: "Cloudflare KV; list reads may be eventually consistent",
             }, null, 2),
           }],
@@ -374,7 +374,7 @@ function registerProjectTools(server: McpServer) {
   server.registerTool(
     "nexus_update_project",
     {
-      description: "Update a saved NEXUS project. Supply the revision you last read to avoid overwriting a newer edit.",
+      description: "Update a saved NEXUS project. A revision check detects stale reads, but KV does not provide transactional compare-and-swap for simultaneous writes.",
       inputSchema: z.object({
         projectId: z.string().uuid(),
         expectedRevision: z.number().int().positive(),
