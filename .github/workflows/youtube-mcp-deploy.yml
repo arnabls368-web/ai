@@ -1,6 +1,7 @@
 name: Deploy NEXUS YouTube MCP to Cloudflare
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - feature/youtube-upload-mcp
