@@ -39,8 +39,8 @@ app.get("/authorize", async (c) => {
 		client: await c.env.OAUTH_PROVIDER.lookupClient(clientId),
 		csrfToken,
 		server: {
-			description: "This MCP Server is a demo for Google OAuth.",
-			name: "Google OAuth Demo",
+			description: "Connect your Google account to upload finished videos privately to your YouTube channel.",
+			name: "NEXUS Universe YouTube MCP",
 		},
 		setCookie,
 		state: { oauthReqInfo },
