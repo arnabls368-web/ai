@@ -50,13 +50,14 @@ export function registerProviderTools(server: McpServer) {
       description: "Research a video topic with Exa web search. Returns source URLs, titles and relevant excerpts for script research and fact-checking. Requires EXA_API_KEY.",
       inputSchema: z.object({
         query: z.string().min(3).max(1000),
-        objective: z.string().min(10).max(1500).default("Find reliable, relevant sources and factual evidence for a YouTube video."),
+        category: z.enum(["general", "breaking_news", "current_affairs", "politics", "world_news", "local_news", "technology_ai", "business_finance", "science", "health", "sports", "entertainment", "culture", "environment"]).default("general"),
+        objective: z.string().min(10).max(1500).default("Find recent, reliable sources and independently verifiable factual evidence for a YouTube video."),
         numResults: z.number().int().min(1).max(10).default(5),
         includeDomains: z.array(z.string().min(1).max(253)).max(10).optional(),
         excludeDomains: z.array(z.string().min(1).max(253)).max(10).optional(),
       }),
     },
-    async ({ query, objective, numResults, includeDomains, excludeDomains }) => {
+    async ({ query, category, objective, numResults, includeDomains, excludeDomains }) => {
       try {
         const apiKey = secret("EXA_API_KEY");
         if (!apiKey) throw new Error("Exa is not configured on this Worker. Add EXA_API_KEY as a Cloudflare Worker secret.");
@@ -75,6 +76,7 @@ export function registerProviderTools(server: McpServer) {
         }, "Exa");
         return result({
           query,
+          category,
           results: (data.results ?? []).map((item: any) => ({
             title: item.title,
             url: item.url,
