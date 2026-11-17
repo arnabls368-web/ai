@@ -25,7 +25,7 @@ The following require separate provider adapters and credentials; the MCP server
 - Image and video generation
 - Video rendering/editing service (FFmpeg or a hosted render worker)
 - Thumbnail generation
-- YouTube channel analytics, comments, playlists and scheduling
+- YouTube comments, playlists and scheduling
 
 Cloudflare Workers are used for orchestration and OAuth, not long-running video rendering. Heavy media processing should run in a dedicated render service or container and return a finished file URL for the uploader.
 
@@ -68,6 +68,14 @@ The production Worker is named `phn-youtube-mcp`. Its Wrangler configuration dec
 - Existing secret names: `COOKIE_ENCRYPTION_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
 
 Keep secret values in Cloudflare's secret store. Never put them in source code, GitHub commits, logs or chat.
+
+Google OAuth requests these scopes:
+
+- `youtube.upload` for private video uploads
+- `youtube.readonly` for channel and video read access
+- `yt-analytics.readonly` for channel analytics
+
+Existing authorizations do not gain new scopes automatically. Reconnect the Google account and approve the expanded read-only permissions before using channel insights tools.
 
 The Google OAuth web client must include this redirect URI:
 
