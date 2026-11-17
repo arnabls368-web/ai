@@ -81,7 +81,7 @@ The Google OAuth web client must include this redirect URI:
 
 `https://phn-youtube-mcp.arnabls368.workers.dev/callback`
 
-YouTube Data API v3 must be enabled in the associated Google Cloud project.
+Enable both **YouTube Data API v3** and **YouTube Analytics API** in the associated Google Cloud project. The Analytics API is needed by the daily channel analytics tool.
 
 ## Connect an MCP client
 
