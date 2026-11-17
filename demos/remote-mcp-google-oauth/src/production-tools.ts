@@ -59,6 +59,8 @@ export function registerProductionTools(server: McpServer) {
         { id: "approval", label: "Human review and approval", status: "required" },
         { id: "upload", label: "Upload to YouTube as PRIVATE", status: "approval_gated" },
       ];
+      project.workflow = stages;
+      await env.OAUTH_KV.put(projectKey(owner, projectId), JSON.stringify(project));
       return {
         content: [{
           type: "text" as const,
@@ -98,9 +100,10 @@ export function registerProductionTools(server: McpServer) {
         aspectRatio: z.enum(["16:9", "9:16", "1:1"]).default("16:9"),
         visualDirection: z.string().max(500).default("clear, cinematic visuals"),
         maxSceneSeconds: z.number().int().min(3).max(30).default(8),
+        projectId: z.string().uuid().optional(),
       }),
     },
-    async ({ script, targetDurationSeconds, aspectRatio, visualDirection, maxSceneSeconds }) => {
+    async ({ script, targetDurationSeconds, aspectRatio, visualDirection, maxSceneSeconds, projectId }) => {
       const sentences = script
         .replace(/\s+/g, " ")
         .match(/[^.!?]+[.!?]+|[^.!?]+$/g) ?? [script];
@@ -119,6 +122,16 @@ export function registerProductionTools(server: McpServer) {
           assetStatus: "not_generated",
         };
       });
+      if (projectId) {
+        const owner = await getProjectScope();
+        const key = projectKey(owner, projectId);
+        const project = await env.OAUTH_KV.get<NexusProject>(key, "json");
+        if (!project) throw new Error("Project not found for this account.");
+        project.storyboard = { script, aspectRatio, targetDurationSeconds, scenes };
+        project.revision += 1;
+        project.updatedAt = new Date().toISOString();
+        await env.OAUTH_KV.put(key, JSON.stringify(project));
+      }
       return {
         content: [{
           type: "text" as const,
@@ -145,9 +158,10 @@ export function registerProductionTools(server: McpServer) {
         summary: z.string().min(20).max(3000),
         keywords: z.array(z.string().min(2).max(60)).max(20).default([]),
         callToAction: z.string().max(300).default("Subscribe for more videos."),
+        projectId: z.string().uuid().optional(),
       }),
     },
-    async ({ workingTitle, summary, keywords, callToAction }) => {
+    async ({ workingTitle, summary, keywords, callToAction, projectId }) => {
       const uniqueKeywords = [...new Set(keywords.map((word) => word.trim()).filter(Boolean))];
       const hashtags = uniqueKeywords.slice(0, 3).map((word) =>
         "#" + word.replace(/[^\p{L}\p{N}_]/gu, ""),
@@ -158,14 +172,27 @@ export function registerProductionTools(server: McpServer) {
         callToAction.trim(),
         hashtags.length ? `\n\n${hashtags.join(" ")}` : "",
       ].join("\n").trim();
+      const publishPackage = {
+        title: workingTitle.trim(),
+        description,
+        tags: uniqueKeywords,
+      };
+      if (projectId) {
+        const owner = await getProjectScope();
+        const key = projectKey(owner, projectId);
+        const project = await env.OAUTH_KV.get<NexusProject>(key, "json");
+        if (!project) throw new Error("Project not found for this account.");
+        project.publishPackage = publishPackage;
+        project.revision += 1;
+        project.updatedAt = new Date().toISOString();
+        await env.OAUTH_KV.put(key, JSON.stringify(project));
+      }
       return {
         content: [{
           type: "text" as const,
           text: JSON.stringify({
             status: "metadata_draft_created",
-            title: workingTitle.trim(),
-            description,
-            tags: uniqueKeywords,
+            ...publishPackage,
             privacyStatus: "private",
             publishAction: "not_performed",
           }, null, 2),
@@ -270,6 +297,21 @@ type NexusProject = {
   revision: number;
   createdAt: string;
   updatedAt: string;
+  workflow?: Array<{ id: string; label: string; status: string; updatedAt?: string; note?: string }>;
+  storyboard?: {
+    script: string;
+    aspectRatio: string;
+    targetDurationSeconds: number;
+    scenes: Array<{
+      scene: number;
+      startSeconds: number;
+      durationSeconds: number;
+      narration: string;
+      visualPrompt: string;
+      assetStatus: string;
+    }>;
+  };
+  publishPackage?: { title: string; description: string; tags: string[] };
 };
 
 async function getProjectScope(): Promise<string> {
@@ -420,6 +462,46 @@ function registerProjectTools(server: McpServer) {
           ...project,
           ...changes,
           notes: addNote ? [...project.notes, addNote].slice(-100) : project.notes,
+          revision: project.revision + 1,
+          updatedAt: new Date().toISOString(),
+        };
+        await env.OAUTH_KV.put(key, JSON.stringify(updated));
+        return projectResult(updated);
+      } catch (error) {
+        return projectError(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "nexus_update_project_stage",
+    {
+      description: "Update one production stage on a saved project and persist its progress.",
+      inputSchema: z.object({
+        projectId: z.string().uuid(),
+        expectedRevision: z.number().int().positive(),
+        stageId: z.string().min(2).max(40),
+        status: z.enum(["planned", "in_progress", "completed", "blocked", "provider_required", "render_provider_required", "required", "approval_gated"]),
+        note: z.string().max(1000).optional(),
+      }),
+    },
+    async ({ projectId, expectedRevision, stageId, status, note }) => {
+      try {
+        const owner = await getProjectScope();
+        const key = projectKey(owner, projectId);
+        const project = await env.OAUTH_KV.get<NexusProject>(key, "json");
+        if (!project) throw new Error("Project not found for this account.");
+        if (project.revision !== expectedRevision) {
+          throw new Error(`Revision conflict: current revision is ${project.revision}. Fetch the project again before updating.`);
+        }
+        const workflow = project.workflow ?? [];
+        const index = workflow.findIndex((stage) => stage.id === stageId);
+        if (index < 0) throw new Error("Stage not found on this project.");
+        workflow[index] = { ...workflow[index], status, updatedAt: new Date().toISOString(), ...(note ? { note } : {}) };
+        const updated: NexusProject = {
+          ...project,
+          workflow,
+          notes: note ? [...project.notes, `${stageId}: ${note}`].slice(-100) : project.notes,
           revision: project.revision + 1,
           updatedAt: new Date().toISOString(),
         };
