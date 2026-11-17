@@ -1,5 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
+import { env } from "cloudflare:workers";
+import { getMcpAuthContext } from "agents/mcp/server";
 
 const formats = ["long_form", "shorts", "tutorial", "documentary", "faceless"] as const;
 
@@ -9,6 +11,8 @@ const formats = ["long_form", "shorts", "tutorial", "documentary", "faceless"] a
  * are added separately and report unavailable until configured.
  */
 export function registerProductionTools(server: McpServer) {
+  registerProjectTools(server);
+
   server.registerTool(
     "nexus_plan_video",
     {
@@ -226,5 +230,184 @@ export function registerProductionTools(server: McpServer) {
         }, null, 2),
       }],
     }),
+  );
+}
+
+
+// Project records are stored under a dedicated key prefix in the existing KV
+// namespace. OAuth provider keys are left untouched. For this initial single-
+// owner workflow KV is inexpensive; move to D1 when transactional updates,
+// richer queries, or multiple collaborators are required.
+type NexusProject = {
+  id: string;
+  name: string;
+  concept: string;
+  audience: string;
+  format: (typeof formats)[number];
+  targetDurationMinutes: number;
+  status: "idea" | "scripting" | "production" | "review" | "ready" | "archived";
+  notes: string[];
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+async function getProjectScope(): Promise<string> {
+  const auth = getMcpAuthContext()?.props as { email?: string } | undefined;
+  if (!auth?.email) throw new Error("A signed-in Google account with an email address is required.");
+  const bytes = new TextEncoder().encode(auth.email.trim().toLowerCase());
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
+}
+
+function projectKey(owner: string, id: string): string {
+  return `nexus:projects:v1:${owner}:${id}`;
+}
+
+function projectResult(project: NexusProject) {
+  return { content: [{ type: "text" as const, text: JSON.stringify(project, null, 2) }] };
+}
+
+function projectError(error: unknown) {
+  return {
+    isError: true,
+    content: [{
+      type: "text" as const,
+      text: error instanceof Error ? error.message : "Project operation failed.",
+    }],
+  };
+}
+
+function registerProjectTools(server: McpServer) {
+  server.registerTool(
+    "nexus_create_project",
+    {
+      description: "Create and persist a NEXUS video project for the authenticated Google account.",
+      inputSchema: z.object({
+        name: z.string().min(2).max(100),
+        concept: z.string().min(10).max(2000),
+        audience: z.string().min(3).max(500),
+        format: z.enum(formats),
+        targetDurationMinutes: z.number().positive().max(180),
+      }),
+    },
+    async (input) => {
+      try {
+        const owner = await getProjectScope();
+        const now = new Date().toISOString();
+        const project: NexusProject = {
+          id: crypto.randomUUID(),
+          ...input,
+          status: "idea",
+          notes: [],
+          revision: 1,
+          createdAt: now,
+          updatedAt: now,
+        };
+        await env.OAUTH_KV.put(projectKey(owner, project.id), JSON.stringify(project));
+        return projectResult(project);
+      } catch (error) {
+        return projectError(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "nexus_list_projects",
+    {
+      description: "List saved NEXUS projects belonging only to the authenticated Google account.",
+      inputSchema: z.object({
+        limit: z.number().int().min(1).max(100).default(25),
+        status: z.enum(["idea", "scripting", "production", "review", "ready", "archived"]).optional(),
+      }),
+    },
+    async ({ limit, status }) => {
+      try {
+        const owner = await getProjectScope();
+        const listed = await env.OAUTH_KV.list({ prefix: `nexus:projects:v1:${owner}:`, limit: 1000 });
+        const records = await Promise.all(
+          listed.keys.slice(0, 1000).map(async ({ name }) => {
+            const value = await env.OAUTH_KV.get<NexusProject>(name, "json");
+            return value;
+          }),
+        );
+        const projects = records
+          .filter((project): project is NexusProject => project !== null)
+          .filter((project) => !status || project.status === status)
+          .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+          .slice(0, limit);
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              projects,
+              returned: projects.length,
+              truncated: !listed.list_complete || records.length > projects.length,
+              storage: "Cloudflare KV; list reads may be eventually consistent",
+            }, null, 2),
+          }],
+        };
+      } catch (error) {
+        return projectError(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "nexus_get_project",
+    {
+      description: "Retrieve one saved NEXUS project, scoped to the authenticated Google account.",
+      inputSchema: z.object({ projectId: z.string().uuid() }),
+    },
+    async ({ projectId }) => {
+      try {
+        const owner = await getProjectScope();
+        const project = await env.OAUTH_KV.get<NexusProject>(projectKey(owner, projectId), "json");
+        if (!project) throw new Error("Project not found for this account.");
+        return projectResult(project);
+      } catch (error) {
+        return projectError(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "nexus_update_project",
+    {
+      description: "Update a saved NEXUS project. Supply the revision you last read to avoid overwriting a newer edit.",
+      inputSchema: z.object({
+        projectId: z.string().uuid(),
+        expectedRevision: z.number().int().positive(),
+        name: z.string().min(2).max(100).optional(),
+        concept: z.string().min(10).max(2000).optional(),
+        audience: z.string().min(3).max(500).optional(),
+        format: z.enum(formats).optional(),
+        targetDurationMinutes: z.number().positive().max(180).optional(),
+        status: z.enum(["idea", "scripting", "production", "review", "ready", "archived"]).optional(),
+        addNote: z.string().min(1).max(2000).optional(),
+      }),
+    },
+    async ({ projectId, expectedRevision, addNote, ...changes }) => {
+      try {
+        const owner = await getProjectScope();
+        const key = projectKey(owner, projectId);
+        const project = await env.OAUTH_KV.get<NexusProject>(key, "json");
+        if (!project) throw new Error("Project not found for this account.");
+        if (project.revision !== expectedRevision) {
+          throw new Error(`Revision conflict: current revision is ${project.revision}. Fetch the project again before updating.`);
+        }
+        const updated: NexusProject = {
+          ...project,
+          ...changes,
+          notes: addNote ? [...project.notes, addNote].slice(-100) : project.notes,
+          revision: project.revision + 1,
+          updatedAt: new Date().toISOString(),
+        };
+        await env.OAUTH_KV.put(key, JSON.stringify(updated));
+        return projectResult(updated);
+      } catch (error) {
+        return projectError(error);
+      }
+    },
   );
 }
