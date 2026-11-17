@@ -44,9 +44,9 @@ docker run --rm -v "$PWD/render-input:/input" -v "$PWD/render-output:/output" \
   nexus-ffmpeg-renderer /input/manifest.json /input/asset-map.json /input/assets /output/final.mp4
 ```
 
-## Authenticated render-job API prototype
+## Authenticated render-job API
 
-The package also includes a small Node HTTP wrapper for a **single-process prototype**. It accepts a manifest and asset-ID map, queues a render, exposes job status, and streams the completed MP4. It never accepts remote asset URLs: assets must already exist under the server's configured local asset directory.
+The package includes a Node HTTP service for a **persistent, single-process render API**. It accepts a manifest and asset-ID map, queues a render, exposes job status, and streams the completed MP4. It never accepts remote asset URLs: assets must already exist under the server's configured local asset directory.
 
 ```bash
 # Generate a strong bearer token outside the repository.
@@ -67,11 +67,12 @@ docker run --rm -p 8080:8080 \
 - `GET /jobs/:id` — authenticated job status.
 - `GET /jobs/:id/output` — authenticated MP4 download after success.
 
-Send `Authorization: Bearer <NEXUS_RENDER_TOKEN>` for job routes. The API limits request bodies to 1 MiB, keeps a small in-process queue, runs at most one render by default, and bounds the retained job list. Do not put the token in source control or logs.
+Send `Authorization: Bearer <NEXUS_RENDER_TOKEN>` for job routes. The API limits request bodies to 1 MiB, persists job metadata and queued work as atomic JSON files under `NEXUS_RENDER_WORKDIR`, retries jobs interrupted while running when the service restarts, keeps at most 100 terminal job records, and runs at most one render by default. Mount `/work` on persistent storage; without that persistent mount, job state and output files are lost when the container is removed. Mount a trusted asset directory read-only. Do not put the token in source control or logs.
 
-**Important prototype limits:** job state and queue are in memory and disappear on restart; jobs are not tenant-isolated beyond the single shared bearer token; there is no R2 integration, persistent queue, retry policy, cancellation, or callback to the Worker. Mount a trusted asset directory read-only. Do not expose this prototype publicly or treat it as production-ready. A production deployment needs durable job state/queue, per-user authorization, R2 object ownership checks, lifecycle cleanup, retries/idempotency, observability and authenticated callbacks.
+**Important limits:** this is still a single-process, single-bearer-token prototype. It is not a distributed queue, does not provide per-user/tenant authorization, R2 integration, idempotency keys, cancellation, authenticated callbacks to the Worker, or multi-replica coordination. Do not expose it publicly or treat it as a production multi-tenant service. Production still needs tenant-bound credentials, trusted R2 object ownership checks, durable orchestration, lifecycle cleanup, observability and secure Worker-to-renderer connectivity.
+
 ## Deliberate boundaries
 
-The CLI is the rendering engine. The included authenticated HTTP wrapper is an early single-process job API prototype, not the durable hosted service. Neither component downloads arbitrary URLs, accesses R2 credentials, or uploads to YouTube. A production service must resolve asset IDs from trusted R2 storage, persist job state, call this engine, upload results to R2 and report job state back to NEXUS.
+The CLI is the rendering engine. The included authenticated HTTP service is an early persistent single-process job API, not the durable hosted service. Neither component downloads arbitrary URLs, accesses R2 credentials, or uploads to YouTube. A production service must resolve asset IDs from trusted R2 storage, persist job state, call this engine, upload results to R2 and report job state back to NEXUS.
 
 No paid service or Cloudflare resource is created by this package.
