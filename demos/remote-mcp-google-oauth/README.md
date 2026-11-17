@@ -1,150 +1,110 @@
-# Model Context Protocol (MCP) Server + Google OAuth
+# NEXUS Universe YouTube Automation MCP
 
-This is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/introduction) server that supports remote MCP connections, with Google OAuth built-in.
+A remote MCP server that lets Claude and other MCP clients orchestrate a YouTube video-production workflow. It runs on Cloudflare Workers, authenticates users with Google OAuth, and exposes production-planning tools plus a private-only YouTube uploader.
 
-> [!IMPORTANT]
-> Before you deploy, set `MCP_RESOURCE` in `wrangler.jsonc` to the URL MCP clients connect to, for example `https://<worker-name>.<your-subdomain>.workers.dev/mcp`. [Workers OAuth Provider](https://github.com/cloudflare/workers-oauth-provider) binds every token to that URL. The default value works for local development.
+> **Safety default:** uploads are restricted to `private`. There is no public/unlisted publishing option. The upload tool must never be used without the user's explicit approval.
 
-You can deploy it to your own Cloudflare account, and after you create your own Google Cloud OAuth client app, you'll have a fully functional remote MCP server that you can build off. Users will be able to connect to your MCP server by signing in with their Google account.
+## Current capabilities
 
-You can use this as a reference example for how to integrate other OAuth providers with an MCP server deployed to Cloudflare, using the [`workers-oauth-provider` library](https://github.com/cloudflare/workers-oauth-provider).
+| Tool | What it does | Execution status |
+| --- | --- | --- |
+| `nexus_plan_video` | Creates a structured project brief and production stages | Available |
+| `nexus_create_storyboard` | Converts a script into timed scenes and visual prompts | Available; planning only |
+| `nexus_build_publish_package` | Drafts YouTube title, description and tags | Available |
+| `nexus_check_production_readiness` | Checks assets and explicit upload approval | Available |
+| `nexus_provider_status` | Reports configured and missing integrations | Available |
+| `youtube_upload_video` | Uploads a finished HTTPS video file to YouTube | Implemented; private only; 50 MB limit |
 
-The MCP server (powered by [Cloudflare Workers](https://developers.cloudflare.com/workers/)):
+## Not yet connected
 
-- Acts as OAuth _Server_ to your MCP clients
-- Acts as OAuth _Client_ to your _real_ OAuth server (in this case, Google)
+The following require separate provider adapters and credentials; the MCP server does not pretend these functions are available until configured:
 
-> [!WARNING]
-> This is a demo template designed to help you get started quickly. While we have implemented several security controls, **you must implement all preventive and defense-in-depth security measures before deploying to production**. Please review our comprehensive security guide: [Securing MCP Servers](https://github.com/cloudflare/agents/blob/main/docs/securing-mcp-servers.md)
+- Web research and competitor/trend discovery
+- AI script and fact-checking provider
+- Text-to-speech / voice generation
+- Image and video generation
+- Video rendering/editing service (FFmpeg or a hosted render worker)
+- Thumbnail generation
+- YouTube channel analytics, comments, playlists and scheduling
 
-## Getting Started
+Cloudflare Workers are used for orchestration and OAuth, not long-running video rendering. Heavy media processing should run in a dedicated render service or container and return a finished file URL for the uploader.
 
-Clone the repo & install dependencies: `npm install`
+## Architecture
 
-### For Production
+1. **MCP client / agent:** Claude plans work and invokes tools.
+2. **Cloudflare Worker:** authenticates the MCP client and exposes tools at `/mcp`.
+3. **Google OAuth:** grants YouTube upload permission and stores refreshable authorization.
+4. **Production workflow tools:** create briefs, storyboards, metadata drafts and readiness checks.
+5. **Provider adapters (next phase):** research, voice, image/video generation and rendering.
+6. **YouTube Data API:** uploads the final render as private content.
 
-Create a new [Google Cloud OAuth App](https://cloud.google.com/iam/docs/workforce-manage-oauth-app):
+Projects should eventually be persisted in a dedicated application-data store, separate from OAuth state. Each production job should have an ID, stage status, retry information, asset references, cost estimates and an approval audit trail.
 
-- For the Homepage URL, specify `https://mcp-google-oauth.<your-subdomain>.workers.dev`
-- For the Authorization callback URL, specify `https://mcp-google-oauth.<your-subdomain>.workers.dev/callback`
-- Note your Client ID and generate a Client secret.
-- Set secrets via Wrangler
+## Local development
+
+Requirements: Node.js 22+ and npm.
 
 ```bash
-wrangler secret put GOOGLE_CLIENT_ID
-wrangler secret put GOOGLE_CLIENT_SECRET
-wrangler secret put COOKIE_ENCRYPTION_KEY # add any random string here e.g. openssl rand -hex 32
-wrangler secret put HOSTED_DOMAIN # optional: use this when restrict google account domain
+npm install
+npm run type-check
+npm run dev
 ```
 
-#### Set up a KV namespace
+For local OAuth, create a separate Google OAuth web client and use `http://localhost:8788/callback` as its redirect URI. Put development-only credentials in `.dev.vars`:
 
-- Create the KV namespace:
-  `wrangler kv:namespace create "OAUTH_KV"`
-- Update the Wrangler file with the KV ID
-
-#### Deploy & Test
-
-Deploy the MCP server to make it available on your workers.dev domain
-` wrangler deploy`
-
-Test the remote server using [Inspector](https://modelcontextprotocol.io/docs/tools/inspector):
-
-```
-npx @modelcontextprotocol/inspector@latest
+```dotenv
+GOOGLE_CLIENT_ID=your_development_client_id
+GOOGLE_CLIENT_SECRET=your_development_client_secret
 ```
 
-Enter `https://mcp-google-oauth.<your-subdomain>.workers.dev/mcp` and hit connect. Once you go through the authentication flow, you'll see the Tools working:
+Do not commit `.dev.vars` or secrets.
 
-<img width="640" alt="image" src="https://github.com/user-attachments/assets/7973f392-0a9d-4712-b679-6dd23f824287" />
+## Cloudflare configuration
 
-You now have a remote MCP server deployed!
+The production Worker is named `phn-youtube-mcp`. Its Wrangler configuration declares:
 
-### Access Control
+- `MCP_RESOURCE=https://phn-youtube-mcp.arnabls368.workers.dev/mcp`
+- KV binding `OAUTH_KV` for the OAuth provider
+- Existing secret names: `COOKIE_ENCRYPTION_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
 
-This MCP server uses Google Cloud OAuth for authentication. All authenticated Google users can access basic tools like "add". When you restrict users with hosted domain, set `HOSTED_DOMAIN` env.
+Keep secret values in Cloudflare's secret store. Never put them in source code, GitHub commits, logs or chat.
 
-### Access the remote MCP server from Claude Desktop
+The Google OAuth web client must include this redirect URI:
 
-Open Claude Desktop and navigate to Settings -> Developer -> Edit Config. This opens the configuration file that controls which MCP servers Claude can access.
+`https://phn-youtube-mcp.arnabls368.workers.dev/callback`
 
-Replace the content with the following configuration. Once you restart Claude Desktop, a browser window will open showing your OAuth login page. Complete the authentication flow to grant Claude access to your MCP server. After you grant access, the tools will become available for you to use.
+YouTube Data API v3 must be enabled in the associated Google Cloud project.
 
-```
+## Connect an MCP client
+
+For Claude Desktop or another client that supports remote MCP through `mcp-remote`, configure:
+
+```json
 {
   "mcpServers": {
-    "math": {
+    "nexus-youtube": {
       "command": "npx",
       "args": [
         "mcp-remote",
-        "https://mcp-google-oauth.<your-subdomain>.workers.dev/mcp"
+        "https://phn-youtube-mcp.arnabls368.workers.dev/mcp"
       ]
     }
   }
 }
 ```
 
-Once the Tools (under 🔨) show up in the interface, you can ask Claude to use them. For example: "Could you use the math tool to add 23 and 19?". Claude should invoke the tool and show the result generated by the MCP server.
+Complete the Google OAuth flow when prompted. The connected account authorizes the YouTube upload tool.
 
-### For Local Development
+## Deployment
 
-If you'd like to iterate and test your MCP server, you can do so in local development. This will require you to create another OAuth App on Google Cloud:
+The GitHub Actions workflow builds the Worker bundle and deploys only when the repository secret `CLOUDFLARE_API_TOKEN` is configured. The token should be restricted to the target Cloudflare account and Workers Scripts Write permission. If it is absent, deployment safely skips.
 
-- For the Homepage URL, specify `http://localhost:8788`
-- For the Authorization callback URL, specify `http://localhost:8788/callback`
-- Note your Client ID and generate a Client secret.
-- Create a `.dev.vars` file in your project root with:
+Never merge the draft pull request or create a test upload without explicit user approval. Verify the deployed `/mcp` endpoint and list tools with MCP Inspector before considering deployment complete.
 
-```
-GOOGLE_CLIENT_ID=your_development_google_cloud_oauth_client_id
-GOOGLE_CLIENT_SECRET=your_development_google_cloud_oauth_client_secret
-```
+## Upload behavior
 
-#### Develop & Test
-
-Run the server locally to make it available at `http://localhost:8788`
-`wrangler dev`
-
-To test the local server, enter `http://localhost:8788/mcp` into Inspector and hit connect. Once you follow the prompts, you'll be able to "List Tools".
-
-#### Using Claude and other MCP Clients
-
-When using Claude to connect to your remote MCP server, you may see some error messages. This is because Claude Desktop doesn't yet support remote MCP servers, so it sometimes gets confused. To verify whether the MCP server is connected, hover over the 🔨 icon in the bottom right corner of Claude's interface. You should see your tools available there.
-
-#### Using Cursor and other MCP Clients
-
-To connect Cursor with your MCP server, choose `Type`: "Command" and in the `Command` field, combine the command and args fields into one (e.g. `npx mcp-remote https://<your-worker-name>.<your-subdomain>.workers.dev/mcp`).
-
-If your Cursor version does not support remote servers with authentication, use `mcp-remote` as a STDIO server instead.
-
-You can connect your MCP server to other MCP clients like Windsurf by opening the client's configuration file, adding the same JSON that was used for the Claude setup, and restarting the MCP client.
-
-## How does it work?
-
-#### OAuth Provider
-
-The OAuth Provider library serves as a complete OAuth 2.1 server implementation for Cloudflare Workers. It handles the complexities of the OAuth flow, including token issuance, validation, and management. In this project, it plays the dual role of:
-
-- Authenticating MCP clients that connect to your server
-- Managing the connection to Google Cloud's OAuth services
-- Securely storing tokens and authentication state in KV storage
-
-#### createMcpHandler
-
-`createMcpHandler` from `agents/mcp/server` serves an MCP SDK v2 `McpServer` from a Worker. It is stateless: each request builds a fresh server, so there are no sessions or Durable Objects to manage. It provides:
-
-- Access to authenticated user information via `getMcpAuthContext()`
-- Support for conditional tool availability based on user identity
-
-#### MCP Remote
-
-The MCP Remote library enables your server to expose tools that can be invoked by MCP clients like the Inspector. It:
-
-- Defines the protocol for communication between clients and your server
-- Provides a structured way to define tools
-- Handles serialization and deserialization of requests and responses
-- Serves the Streamable HTTP transport at `/mcp`
-
-## Transport
-
-The server serves the Streamable HTTP transport at `/mcp`. It does not serve the deprecated SSE transport.
+- Only public HTTPS video URLs are accepted.
+- The first implementation has a 50 MB file-size limit.
+- Video visibility is schema-locked to `private`.
+- The tool reports the returned YouTube video ID.
+- No video is uploaded during planning or readiness checks.
