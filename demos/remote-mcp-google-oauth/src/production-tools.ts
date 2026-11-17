@@ -258,6 +258,8 @@ export function registerProductionTools(server: McpServer) {
             storyboardPlanning: "available",
             youtubeMetadataDrafting: "available",
             productionReadinessChecks: "available",
+            persistentProjectsAndStageTracking: "available",
+            persistentStoryboardsAndMetadataDrafts: "available",
             youtubePrivateUpload: "implemented_in_existing_tool",
             webResearch: "not_yet_integrated",
             aiVoiceGeneration: "provider_not_configured",
