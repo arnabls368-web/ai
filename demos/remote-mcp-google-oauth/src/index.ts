@@ -86,16 +86,20 @@ function createServer() {
     "youtube_upload_video",
     {
       description:
-        "Upload a finished video from a publicly reachable HTTPS video URL to the authenticated YouTube channel. Videos default to private. Maximum file size: 50 MB.",
+        "Upload a finished video from a publicly reachable HTTPS video URL to the authenticated YouTube channel. Videos are private only. Before invoking this tool, obtain the user's explicit approval for this exact video and title, then set userApprovalConfirmed=true. Never infer approval from a general request to automate the channel. Maximum file size: 50 MB.",
       inputSchema: z.object({
         videoUrl: z.string().url().describe("Direct HTTPS URL to the finished video file"),
         title: z.string().min(1).max(100),
         description: z.string().max(5000).optional(),
         privacyStatus: z.literal("private").default("private"),
+        userApprovalConfirmed: z.literal(true).describe("Must be true only after the user explicitly approves this exact video and title in the current conversation."),
       }),
     },
-    async ({ videoUrl, title, description, privacyStatus }) => {
+    async ({ videoUrl, title, description, privacyStatus, userApprovalConfirmed }) => {
       const auth = getMcpAuthContext()?.props as Props | undefined;
+      if (userApprovalConfirmed !== true) {
+        return { isError: true, content: [{ type: "text", text: "Explicit user approval for this exact private upload is required." }] };
+      }
       if (!auth?.accessToken) {
         return { isError: true, content: [{ type: "text", text: "YouTube is not connected. Reconnect your Google account." }] };
       }
