@@ -61,8 +61,9 @@ export function registerProviderTools(server: McpServer) {
       try {
         const apiKey = secret("EXA_API_KEY");
         if (!apiKey) throw new Error("Exa is not configured on this Worker. Add EXA_API_KEY as a Cloudflare Worker secret.");
+        const searchQuery = category === "general" ? query : `${category.replaceAll("_", " ")}: ${query}`;
         const body: Record<string, unknown> = {
-          query,
+          query: searchQuery,
           type: "auto",
           numResults,
           contents: { highlights: { query: objective, verbosity: "medium" } },
