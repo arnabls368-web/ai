@@ -54,4 +54,5 @@ jobs:
 
       - name: Report missing deployment credential
         if: steps.credentials.outputs.configured != 'true'
+        working-directory: .
         run: echo "Deployment skipped. Add the CLOUDFLARE_API_TOKEN repository secret to enable deployment."
