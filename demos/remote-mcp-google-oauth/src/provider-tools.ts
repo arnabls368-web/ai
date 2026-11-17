@@ -28,7 +28,7 @@ function failure(error: unknown) {
 
 function trustedFalUrl(value: string): string {
   const url = new URL(value);
-  if (url.protocol !== "https:" || url.hostname !== "queue.fal.run" || url.username || url.password) {
+  if (url.protocol !== "https:" || !["queue.fal.run", "queue.falrun.com"].includes(url.hostname) || url.username || url.password) {
     throw new Error("fal.ai returned an unexpected queue URL; refusing to fetch it.");
   }
   return url.toString();
