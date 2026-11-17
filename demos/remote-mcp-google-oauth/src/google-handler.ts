@@ -15,6 +15,28 @@ import {
 
 const app = new Hono<{ Bindings: Env & { OAUTH_PROVIDER: OAuthHelpers } }>();
 
+// Lightweight operational probe for deployment verification. This endpoint does not
+// expose credentials or user data and is intentionally independent of Google OAuth.
+app.get("/health", (c) =>
+  c.json({
+    ok: true,
+    service: "NEXUS Universe YouTube Automation MCP",
+    version: "1.2.0",
+    mcpEndpoint: "/mcp",
+  }),
+);
+
+// Human-friendly root response so the deployed Worker is distinguishable from
+// Cloudflare's starter "Hello World" Worker during smoke tests.
+app.get("/", (c) =>
+  c.json({
+    service: "NEXUS Universe YouTube Automation MCP",
+    status: "running",
+    health: "/health",
+    mcp: "/mcp",
+  }),
+);
+
 app.get("/authorize", async (c) => {
 	const oauthReqInfo = await c.env.OAUTH_PROVIDER.parseAuthRequest(c.req.raw);
 	const { clientId } = oauthReqInfo;
