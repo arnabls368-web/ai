@@ -79,7 +79,7 @@ async function uploadToYouTube(
 function createServer() {
   const server = new McpServer({
     name: "NEXUS Universe YouTube Automation MCP",
-    version: "1.1.0",
+    version: "1.2.0",
   });
 
   server.registerTool(
