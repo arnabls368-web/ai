@@ -112,7 +112,7 @@ async function redirectToGoogle(
 				clientId: env.GOOGLE_CLIENT_ID,
 				hostedDomain: env.HOSTED_DOMAIN,
 				redirectUri: new URL("/callback", request.url).href,
-				scope: "email profile",
+				scope: "openid email profile https://www.googleapis.com/auth/youtube.upload",
 				state: stateToken,
 				upstreamUrl: "https://accounts.google.com/o/oauth2/v2/auth",
 			}),
@@ -165,7 +165,7 @@ app.get("/callback", async (c) => {
 		return c.text("Missing code", 400);
 	}
 
-	const [accessToken, googleErrResponse] = await fetchUpstreamAuthToken({
+	const [googleTokens, googleErrResponse] = await fetchUpstreamAuthToken({
 		clientId: c.env.GOOGLE_CLIENT_ID,
 		clientSecret: c.env.GOOGLE_CLIENT_SECRET,
 		code,
@@ -176,6 +176,8 @@ app.get("/callback", async (c) => {
 	if (googleErrResponse) {
 		return googleErrResponse;
 	}
+	if (!googleTokens) return c.text("Google did not return an access token", 500);
+	const { accessToken, refreshToken } = googleTokens;
 
 	// Fetch the user info from Google
 	const userResponse = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
@@ -200,6 +202,7 @@ app.get("/callback", async (c) => {
 		},
 		props: {
 			accessToken,
+			refreshToken,
 			email,
 			name,
 		} as Props,
