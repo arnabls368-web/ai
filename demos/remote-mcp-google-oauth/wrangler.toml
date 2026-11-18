@@ -10,6 +10,8 @@ enabled = true
 [vars]
 MCP_RESOURCE = "https://phn-youtube-mcp.arnab368.workers.dev/mcp"
 HOSTED_DOMAIN = ""
+# Comma-separated exact hostnames permitted as external video URL sources.
+YOUTUBE_UPLOAD_ALLOWED_HOSTS = ""
 
 [[kv_namespaces]]
 binding = "OAUTH_KV"
