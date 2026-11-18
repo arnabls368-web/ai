@@ -30,6 +30,8 @@ jobs:
         run: pnpm --filter remote-mcp-google-oauth run type-check
       - name: Exercise approval flow with the real MCP SDK
         run: node --test demos/remote-mcp-google-oauth/src/human-approval-sdk.spec.mjs
+      - name: Verify Worker-to-renderer signed token compatibility
+        run: node --experimental-strip-types --test demos/remote-mcp-google-oauth/src/render-auth.spec.mjs
       - name: Validate Cloudflare Worker bundle
         run: pnpm --filter remote-mcp-google-oauth exec wrangler deploy --dry-run
 
