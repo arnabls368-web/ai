@@ -181,10 +181,29 @@ app.get("/callback", async (c) => {
 		return c.text("Invalid OAuth request data", 400);
 	}
 
+	// Google can return an OAuth error instead of a code when the user
+	// cancels consent or the upstream authorization request fails. State has
+	// already been validated and consumed, so clear the browser binding and
+	// return a safe, non-reflective message.
+	const upstreamError = c.req.query("error");
+	if (upstreamError) {
+		const denied = upstreamError === "access_denied";
+		return new Response(
+			denied ? "Google authorization was cancelled. You can reconnect when ready." : "Google authorization failed. Please restart the connection flow.",
+			{
+				status: denied ? 403 : 400,
+				headers: { "Content-Type": "text/plain; charset=utf-8", "Set-Cookie": clearSessionCookie },
+			},
+		);
+	}
+
 	// Exchange the code for an access token
 	const code = c.req.query("code");
 	if (!code) {
-		return c.text("Missing code", 400);
+		return new Response("Missing authorization code. Please restart the connection flow.", {
+			status: 400,
+			headers: { "Content-Type": "text/plain; charset=utf-8", "Set-Cookie": clearSessionCookie },
+		});
 	}
 
 	const [googleTokens, googleErrResponse] = await fetchUpstreamAuthToken({
