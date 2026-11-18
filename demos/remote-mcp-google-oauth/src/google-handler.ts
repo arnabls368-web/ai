@@ -294,7 +294,7 @@ app.get("/callback", async (c) => {
 			scope: oauthReqInfo.scope,
 			userId: id,
 		}));
-	} catch (error) {
+	} catch (_error) {
 		console.error("OAuth authorization completion failed");
 		return failWithClearedSession(c.text("Could not complete Google authorization. Please reconnect.", 500));
 	}
