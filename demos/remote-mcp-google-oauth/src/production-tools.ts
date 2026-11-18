@@ -692,19 +692,31 @@ async function googleApiGet(url: string, auth: GoogleAuthProps): Promise<any> {
     // Bound stalled upstream requests so MCP calls cannot hang indefinitely.
     signal: AbortSignal.timeout(20_000),
   });
-  let response = await request(auth.accessToken);
+  let response: Response;
+  try {
+    response = await request(auth.accessToken);
+  } catch {
+    throw new Error("Google API request failed or timed out. Try again.");
+  }
   if (response.status === 401 && auth.refreshToken) {
+    await response.body?.cancel();
     const renewed = await refreshGoogleAccessToken(
       auth.refreshToken,
       env.GOOGLE_CLIENT_ID,
       env.GOOGLE_CLIENT_SECRET,
     );
     if (!renewed) throw new Error("Google authorization expired. Reconnect your Google account and approve the requested read-only YouTube scopes.");
-    response = await request(renewed);
+    try {
+      response = await request(renewed);
+    } catch {
+      throw new Error("Google API request failed or timed out after token refresh. Try again.");
+    }
   }
   if (!response.ok) {
     // Do not relay upstream response bodies, which may contain sensitive details.
-    throw new Error(`Google API request failed (${response.status}).`);
+    const status = response.status;
+    await response.body?.cancel();
+    throw new Error(`Google API request failed (${status}).`);
   }
   try {
     return await readJsonLimited(response, 1_048_576);
