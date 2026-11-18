@@ -679,7 +679,7 @@ function registerRendererTools(server: McpServer) {
           content: [{
             type: "text" as const,
             text: JSON.stringify({
-              status: "render_queued",
+              status: submitted.status === "running" ? "render_running" : "render_queued",
               projectId,
               renderJobId: submitted.id,
               statusTool: "nexus_get_render_status",
