@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { env } from "cloudflare:workers";
 import { getMcpAuthContext } from "agents/mcp/server";
-import { readJsonLimited } from "./utils.js";
+import { readJsonLimited } from "./utils";
 
 type RuntimeEnv = Record<string, unknown>;
 
