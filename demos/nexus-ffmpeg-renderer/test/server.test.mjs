@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createRenderJobServer } from "../src/server.mjs";
@@ -122,6 +122,53 @@ test("restricts persisted job storage permissions", async () => {
       assert.equal(directoryInfo.mode & 0o777, 0o700);
     } finally {
       await instance.close();
+    }
+  });
+});
+test("restart recovery rejects symlinked completed render outputs", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const assetRoot = path.join(workRoot, "assets");
+    await mkdir(assetRoot, { recursive: true });
+    await writeFile(path.join(assetRoot, "scene.jpg"), "image");
+    const fakeFfmpeg = path.join(workRoot, "fake-ffmpeg");
+    await writeFile(fakeFfmpeg, "#!/usr/bin/env node\nconst fs = require('node:fs');\nfs.writeFileSync(process.argv.at(-1), 'fake mp4 output');\n");
+    await chmod(fakeFfmpeg, 0o700);
+    const first = await startServer(workRoot, { ffmpegPath: fakeFfmpeg });
+    let id;
+    try {
+      const submitted = await fetch(`${first.base}/jobs`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify(validPayload()),
+      });
+      assert.equal(submitted.status, 202);
+      ({ id } = await submitted.json());
+      let job;
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const response = await fetch(`${first.base}/jobs/${id}`, { headers: { authorization: `Bearer ${TOKEN}` } });
+        job = await response.json();
+        if (job.status === "succeeded" || job.status === "failed") break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.equal(job.status, "succeeded");
+    } finally {
+      await first.close();
+    }
+    const outputPath = path.join(workRoot, id, "render.mp4");
+    const externalFile = path.join(workRoot, "outside.mp4");
+    await rm(outputPath, { force: true });
+    await writeFile(externalFile, "not a renderer-owned output");
+    await symlink(externalFile, outputPath);
+    const restarted = await startServer(workRoot, { ffmpegPath: fakeFfmpeg });
+    try {
+      const status = await fetch(`${restarted.base}/jobs/${id}`, { headers: { authorization: `Bearer ${TOKEN}` } });
+      assert.equal(status.status, 200);
+      const recovered = await status.json();
+      assert.equal(recovered.status, "failed");
+      const output = await fetch(`${restarted.base}/jobs/${id}/output`, { headers: { authorization: `Bearer ${TOKEN}` } });
+      assert.equal(output.status, 409);
+    } finally {
+      await restarted.close();
     }
   });
 });
