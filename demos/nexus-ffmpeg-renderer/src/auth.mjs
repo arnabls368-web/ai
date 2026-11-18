@@ -43,7 +43,7 @@ export function verifyRenderToken(token, { secret, scope, now = Date.now() } = {
       !["render:submit", "render:read"].includes(claims.scope) ||
       (scope && claims.scope !== scope) ||
       !Number.isInteger(claims.iat) || !Number.isInteger(claims.exp) ||
-      claims.iat > nowSeconds + 30 || claims.exp <= nowSeconds ||
+      claims.iat > nowSeconds + 30 || claims.exp <= nowSeconds || claims.exp <= claims.iat ||
       claims.exp - claims.iat > MAX_TOKEN_TTL_SECONDS) return null;
   return claims;
 }
