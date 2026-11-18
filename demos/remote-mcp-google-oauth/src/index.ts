@@ -10,6 +10,7 @@ import { registerProviderTools } from "./provider-tools";
 import { callPrivateRenderer } from "./render-auth";
 import { hasExactlyOneUploadSource, isVerifiedRenderJob } from "./upload-source.mjs";
 import { uploadResumableVideo } from "./youtube-resumable.mjs";
+import { requestHumanApproval } from "./human-approval.mjs";
 
 export type Props = {
   name: string;
@@ -164,12 +165,10 @@ function createServer() {
         title: z.string().min(1).max(100),
         description: z.string().max(5000).optional(),
         privacyStatus: z.literal("private").default("private"),
-        userApprovalConfirmed: z.literal(true),
       }).refine(hasExactlyOneUploadSource, "Provide either videoUrl OR both projectId and renderJobId."),
     },
-    async ({ videoUrl, projectId, renderJobId, title, description, privacyStatus, userApprovalConfirmed }) => {
+    async ({ videoUrl, projectId, renderJobId, title, description, privacyStatus }, ctx) => {
       const auth = getMcpAuthContext()?.props as Props | undefined;
-      if (userApprovalConfirmed !== true) return { isError: true, content: [{ type: "text", text: "Explicit user approval for this exact private upload is required." }] };
       if (!auth?.accessToken) return { isError: true, content: [{ type: "text", text: "YouTube is not connected. Reconnect your Google account." }] };
       try {
         let source: Response;
@@ -201,6 +200,30 @@ function createServer() {
         const mimeType = (source.headers.get("Content-Type") || "").split(";")[0].trim().toLowerCase();
         if (mimeType !== "video/mp4" && !(videoUrl && mimeType.startsWith("video/"))) { await source.body?.cancel(); throw new Error("The video source must return an MP4 file."); }
         const videoBytes = await readVideoBodyBounded(source);
+        // Bind approval to the exact bytes and metadata after retrieval, but
+        // before opening a YouTube upload session or transmitting the video.
+        const digest = await crypto.subtle.digest("SHA-256", videoBytes);
+        const videoSha256 = Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
+        const sourceLabel = projectId && renderJobId
+          ? "NEXUS render project " + projectId + ", job " + renderJobId
+          : "External HTTPS source host " + new URL(videoUrl!).hostname;
+        const approved = await requestHumanApproval(
+          ctx,
+          [
+            "YOUTUBE PRIVATE UPLOAD APPROVAL",
+            "Google channel account: " + auth.email,
+            "Source: " + sourceLabel,
+            "Video size: " + videoBytes.byteLength + " bytes",
+            "Video SHA-256: " + videoSha256,
+            "Title: " + title,
+            "Description: " + (description || ""),
+            "Visibility: private",
+            "Confirm only if you approve uploading these exact video bytes and metadata to this Google account.",
+          ].join("\n"),
+        );
+        if (!approved) {
+          return { isError: true, content: [{ type: "text", text: "YouTube upload was not approved. No upload session was started." }] };
+        }
         const uploaded = await uploadToYouTube(videoBytes, mimeType, title, description || "", privacyStatus, auth.accessToken, auth.refreshToken);
         return { content: [{ type: "text", text: "Video uploaded successfully. Video ID: " + uploaded.videoId + ". URL: https://www.youtube.com/watch?v=" + uploaded.videoId + ". Visibility: " + uploaded.privacyStatus + "." }] };
       } catch (error) {
