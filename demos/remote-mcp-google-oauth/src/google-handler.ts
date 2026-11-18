@@ -209,14 +209,33 @@ app.get("/callback", async (c) => {
 		redirect: "error",
 	});
 	if (!userResponse.ok) {
-		return c.text(`Failed to fetch user info: ${await userResponse.text()}`, 500);
+		console.error("Google userinfo request failed:", userResponse.status);
+		return c.text("Failed to verify Google account information", 502);
 	}
 
-	const { id, name, email } = (await userResponse.json()) as {
-		id: string;
-		name: string;
-		email: string;
-	};
+	let userInfo: unknown;
+	try {
+		userInfo = await userResponse.json();
+	} catch {
+		return c.text("Google returned invalid account information", 502);
+	}
+	if (
+		!userInfo ||
+		typeof userInfo !== "object" ||
+		!("id" in userInfo) ||
+		typeof userInfo.id !== "string" ||
+		userInfo.id.length === 0 ||
+		!("email" in userInfo) ||
+		typeof userInfo.email !== "string" ||
+		!userInfo.email.includes("@")
+	) {
+		return c.text("Google returned incomplete account information", 502);
+	}
+	const id = userInfo.id;
+	const email = userInfo.email.trim().toLowerCase();
+	const name = "name" in userInfo && typeof userInfo.name === "string" && userInfo.name.trim()
+		? userInfo.name.trim().slice(0, 200)
+		: email;
 
 	// Return back to the MCP client a new token
 	const { redirectTo } = await c.env.OAUTH_PROVIDER.completeAuthorization({
