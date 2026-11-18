@@ -744,8 +744,8 @@ function registerChannelTools(server: McpServer) {
     {
       description: "Read daily channel performance metrics for a date range. Requires YouTube Analytics read-only OAuth access.",
       inputSchema: z.object({
-        startDate: z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/),
-        endDate: z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/),
+        startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
       }),
     },
     async ({ startDate, endDate }) => {
