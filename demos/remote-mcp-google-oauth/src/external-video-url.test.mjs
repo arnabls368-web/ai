@@ -28,6 +28,7 @@ test("external video URLs reject unsafe schemes, credentials, ports, fragments a
     "https://2130706433/video.mp4",
     "https://[::1]/video.mp4",
     "https://metadata.google.internal/video.mp4",
+    "https://media.example.org./video.mp4",
   ]) {
     assert.throws(() => validateExternalVideoUrl(url, allowed), undefined, url);
   }
