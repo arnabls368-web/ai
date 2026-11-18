@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/server";
+import { acceptedContent, inputRequired, inputResponse, McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { env } from "cloudflare:workers";
 import { getMcpAuthContext } from "agents/mcp/server";
@@ -28,6 +28,19 @@ function result(text: unknown) {
 function failure(error: unknown) {
   return { isError: true, content: [{ type: "text" as const, text: error instanceof Error ? error.message : "Provider request failed." }] };
 }
+
+const humanApprovalSchema = z.object({ confirm: z.boolean() });
+const humanApprovalApi = {
+  acceptedContent,
+  inputRequired,
+  inputResponse,
+  approvalSchema: humanApprovalSchema,
+  approvalWireSchema: {
+    type: "object",
+    properties: { confirm: { type: "boolean", title: "I approve this exact operation" } },
+    required: ["confirm"],
+  },
+};
 
 function trustedFalUrl(value: string): string {
   const url = new URL(value);
@@ -150,6 +163,7 @@ export function registerProviderTools(server: McpServer) {
           "Endpoint: " + endpointId + "\n" +
           "Exact input JSON:\n" + inputJson + "\n" +
           "This request may incur charges from fal.ai. The exact price depends on the selected endpoint and its billing terms. Confirm only if you approve this exact request.",
+          humanApprovalApi,
         );
         if (!approval.approved) {
           if (approval.inputRequired) return approval.inputRequired;
