@@ -406,6 +406,41 @@ test("restart recovery enforces the bounded render queue", async () => {
   });
 });
 
+test("live submissions cannot exceed the bounded queue capacity", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const assetRoot = path.join(workRoot, "assets");
+    await mkdir(assetRoot, { recursive: true });
+    await writeFile(path.join(assetRoot, "scene.jpg"), "image");
+    const fakeFfmpeg = path.join(workRoot, "slow-fake-ffmpeg");
+    await writeFile(fakeFfmpeg, [
+      "#!/usr/bin/env node",
+      "const fs = require('node:fs');",
+      "setTimeout(() => fs.writeFileSync(process.argv.at(-1), 'fake mp4 output'), 700);",
+      "",
+    ].join("\n"));
+    await chmod(fakeFfmpeg, 0o700);
+    const instance = await startServer(workRoot, { ffmpegPath: fakeFfmpeg });
+    try {
+      const submit = () => fetch(`${instance.base}/jobs`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify(validPayload()),
+      });
+      const first = await submit();
+      assert.equal(first.status, 202);
+      const second = await submit();
+      assert.equal(second.status, 202);
+      const third = await submit();
+      assert.equal(third.status, 202);
+      const fourth = await submit();
+      assert.equal(fourth.status, 429);
+      assert.match((await fourth.json()).error, /queue is full/i);
+    } finally {
+      await instance.close();
+    }
+  });
+});
+
 test("restart recovery ignores malformed persisted job manifests", async () => {
   await withWorkRoot(async (workRoot) => {
     const id = "12345678-1234-4234-8234-123456789abc";
