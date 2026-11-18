@@ -1,7 +1,9 @@
 import { createServer } from "node:http";
 import { createReadStream } from "node:fs";
-import { chmod, mkdir, readdir, readFile, rename, rm, lstat, writeFile } from "node:fs/promises";
+import { chmod, fstat, mkdir, readdir, readFile, rename, rm, lstat, writeFile } from "node:fs/promises";
+simport
 import path from "node:path";
+import { constants as fsConstants } from "node:fs";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { renderManifest, validateManifest } from "./renderer.mjs";
 import { verifyRenderToken } from "./auth.mjs";
@@ -294,14 +296,27 @@ export function createRenderJobServer({
         if (job.status !== "succeeded" || !job.outputPath) {
           return json(response, 409, { error: "render output is not ready", status: job.status });
         }
-        const outputStream = createReadStream(job.outputPath);
-        outputStream.once("open", () => {
-          response.writeHead(200, {
-            "content-type": "video/mp4",
-            "content-disposition": 'attachment; filename="nexus-render.mp4"',
-            "cache-control": "no-store",
-          });
-          outputStream.pipe(response);
+        const outputStream = createReadStream(job.outputPath, { flags: fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW });
+        outputStream.once("open", async (fd) => {
+          try {
+            const openedFile = await fstat(fd);
+            if (!openedFile.isFile() || openedFile.size === 0) {
+              outputStream.destroy();
+              if (!response.headersSent) json(response, 500, { error: "render output is not a regular file" });
+              return;
+            }
+            response.writeHead(200, {
+              "content-type": "video/mp4",
+              "content-disposition": 'attachment; filename="nexus-render.mp4"',
+              "cache-control": "no-store",
+              "content-length": String(openedFile.size),
+              "x-content-type-options": "nosniff",
+            });
+            outputStream.pipe(response);
+          } catch {
+            outputStream.destroy();
+            if (!response.headersSent) json(response, 500, { error: "render output could not be verified" });
+          }
         });
         outputStream.once("error", () => {
           if (!response.headersSent) json(response, 500, { error: "render output could not be read" });
