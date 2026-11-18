@@ -69,6 +69,21 @@ test("builds FFmpeg arguments for image, video, voice and ducked music", async (
   }
 });
 
+test("rejects symlink aliases whose resolved target is a playlist", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "nexus-render-"));
+  try {
+    await writeFile(path.join(root, "playlist.m3u8"), "#EXTM3U\\n");
+    await writeFile(path.join(root, "two.mp4"), "video");
+    await symlink(path.join(root, "playlist.m3u8"), path.join(root, "alias.jpg"));
+    await assert.rejects(
+      buildFfmpegArgs(sampleManifest(), { a: "alias.jpg", b: "two.mp4" }, root, "/tmp/out.mp4"),
+      /resolved asset target has an unsupported media file type/i
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("rejects asset symlinks that escape the asset directory", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "nexus-render-"));
   const outside = await mkdtemp(path.join(os.tmpdir(), "nexus-outside-"));
