@@ -163,6 +163,7 @@ test("Durable Object rejects malformed state records and expires abandoned state
     async transaction(callback) {
       return callback({
         get: async (key) => values.get(key),
+        put: async (key, value) => values.set(key, value),
         delete: async (key) => values.delete(key),
       });
     },
