@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { bindStateToSession, createOAuthState, validateOAuthState } from "./workers-oauth-utils.ts";
+import { bindStateToSession, createOAuthState, validateOAuthState } from "./workers-oauth-utils.ts";\nimport { OAuthStateDO } from "./oauth-state-do.ts";
 
 function createStateStore() {
   const values = new Map();
@@ -105,4 +105,72 @@ test("concurrent OAuth callbacks can consume a state only once", async () => {
   assert.equal(results.filter((result) => result.status === "rejected").length, 1);
   const rejected = results.find((result) => result.status === "rejected");
   assert.match(rejected.reason.message, /Invalid or expired state/);
+});
+
+test("Durable Object storage transaction enforces one-time consumption under concurrency", async () => {
+  const values = new Map();
+  let transactionTail = Promise.resolve();
+  let alarmAt = null;
+  const storage = {
+    async get(key) { return values.get(key); },
+    async put(key, value) { values.set(key, value); },
+    async delete(key) { return values.delete(key); },
+    async setAlarm(value) { alarmAt = value; },
+    transaction(callback) {
+      const result = transactionTail.then(() => callback({
+        get: async (key) => values.get(key),
+        delete: async (key) => values.delete(key),
+      }));
+      transactionTail = result.catch(() => {});
+      return result;
+    },
+  };
+  const durableObject = new OAuthStateDO({ storage });
+  const expiresAt = Date.now() + 60_000;
+  const stored = await durableObject.fetch(new Request("https://do.example/store", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value: JSON.stringify(authRequest), expiresAt }),
+  }));
+  assert.equal(stored.status, 201);
+  assert.equal(alarmAt, expiresAt);
+
+  const consume = () => durableObject.fetch(new Request("https://do.example/consume", { method: "POST" }));
+  const responses = await Promise.all([consume(), consume()]);
+  assert.deepEqual(responses.map((response) => response.status).sort(), [200, 404]);
+  const winner = responses.find((response) => response.status === 200);
+  assert.deepEqual(await winner.json(), { value: JSON.stringify(authRequest) });
+  assert.equal(values.has("oauth-state"), false);
+});
+
+test("Durable Object rejects malformed state records and expires abandoned state", async () => {
+  const values = new Map();
+  let alarmAt = null;
+  const storage = {
+    async get(key) { return values.get(key); },
+    async put(key, value) { values.set(key, value); },
+    async delete(key) { return values.delete(key); },
+    async setAlarm(value) { alarmAt = value; },
+    async transaction(callback) {
+      return callback({
+        get: async (key) => values.get(key),
+        delete: async (key) => values.delete(key),
+      });
+    },
+  };
+  const durableObject = new OAuthStateDO({ storage });
+  const malformed = await durableObject.fetch(new Request("https://do.example/store", {
+    method: "POST",
+    body: JSON.stringify({ value: "", expiresAt: Date.now() + 60_000 }),
+  }));
+  assert.equal(malformed.status, 400);
+
+  const expiredAt = Date.now() + 1_000;
+  await durableObject.fetch(new Request("https://do.example/store", {
+    method: "POST",
+    body: JSON.stringify({ value: "expired", expiresAt: expiredAt }),
+  }));
+  await durableObject.alarm();
+  assert.equal(values.has("oauth-state"), false);
+  assert.equal(alarmAt, expiredAt);
 });
