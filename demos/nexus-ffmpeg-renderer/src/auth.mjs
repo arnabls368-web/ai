@@ -15,7 +15,7 @@ function signature(secret, payload) {
 export function signRenderToken({ secret, tenantId, projectId, scope, ttlSeconds = 120, now = Date.now() }) {
   if (typeof secret !== "string" || secret.length < 32) throw new Error("NEXUS_RENDER_SIGNING_SECRET must contain at least 32 characters.");
   if (!ID_PATTERN.test(tenantId ?? "") || !ID_PATTERN.test(projectId ?? "")) throw new Error("A valid tenantId and projectId are required.");
-  if (!["render:submit", "render:read"].includes(scope)) throw new Error("Unsupported render token scope.");
+  if (!["render:submit", "render:read", "asset:write"].includes(scope)) throw new Error("Unsupported render token scope.");
   if (!Number.isInteger(ttlSeconds) || ttlSeconds < 1 || ttlSeconds > MAX_TOKEN_TTL_SECONDS) throw new Error("Render token TTL must be between 1 and 300 seconds.");
   const issuedAt = Math.floor(now / 1000);
   const claims = { aud: AUDIENCE, tenantId, projectId, scope, iat: issuedAt, exp: issuedAt + ttlSeconds };
