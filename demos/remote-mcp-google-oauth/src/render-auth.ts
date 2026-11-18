@@ -112,5 +112,5 @@ export async function callPrivateRenderer({
   if (target.origin !== base.origin || !target.pathname.startsWith(base.pathname.replace(/\/$/, "") + "/")) {
     throw new Error("Renderer path escaped its configured base URL.");
   }
-  return fetch(target, { method, headers, body: requestBody, redirect: "error" });
+  return fetch(target, { method, headers, body: requestBody, redirect: "error", signal: AbortSignal.timeout(20_000) });
 }
