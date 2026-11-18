@@ -1,48 +1,70 @@
 # NEXUS renderer production integration plan
 
-Status: design only. No Cloudflare resources, secrets, containers, or external services are created by this document.
+Status: partially implemented and deployed; production end-to-end verification is still outstanding. This document distinguishes implemented code and deployed infrastructure from capabilities that have not yet been proven against live providers.
 
-## Current verified boundary
+## Current architecture
 
-- The Cloudflare Worker persists render manifests and project records in KV.
-- The FFmpeg package can render locally and has a single-process HTTP job API.
-- The HTTP API uses one shared bearer token and local filesystem asset/work directories.
-- The renderer does not currently read or write R2, authenticate individual NEXUS accounts, call back to the Worker, or coordinate multiple replicas.
-- Therefore the renderer API must not be exposed as a public multi-tenant service in its current form.
+- The Cloudflare Worker authenticates NEXUS MCP requests through Google OAuth and scopes project records in KV using a normalized Google-account owner hash.
+- The Worker stores render manifests and per-project asset metadata in KV.
+- Renderer requests use short-lived HMAC-SHA256 bearer credentials bound to the renderer audience, tenant, project, scope, and expiry. Separate scopes protect asset writes, render submission, and render reads.
+- The Railway FFmpeg renderer runs as a single-process, single-replica job service. It persists job records and completed MP4 outputs on a mounted filesystem volume.
+- Generated assets are transferred from HTTPS `fal.media` URLs through the Worker, then stored in a private Railway S3-compatible bucket under tenant/project-scoped object keys.
+- During a render, the renderer retrieves each referenced private object, writes a temporary owner-only local copy, invokes FFmpeg with argument arrays and local-file-only input protocols, and removes the temporary asset directory after the job.
+- The Worker polls job status and retrieves the completed MP4 through signed, owner/project-bound requests.
+- YouTube upload is a separate action. It is private-only, requires explicit approval for the exact video and title, and has a 50 MiB buffering limit. No automatic public publishing is enabled.
 
-## Target request flow
+## Deployed resources and boundaries
 
-1. An authenticated NEXUS MCP request resolves the Google account scope and project ownership in the Worker.
-2. The Worker validates the saved manifest and confirms every asset ID belongs to that same account/project.
-3. The Worker creates a durable render-job record with a unique idempotency key and a stable project revision.
-4. A private render service receives a signed, short-lived job authorization. It must not receive Google OAuth tokens or the fal/Exa API keys.
-5. The renderer obtains input objects from a private R2 bucket using narrowly scoped object access, streams them to bounded local scratch storage, and invokes FFmpeg with argument arrays.
-6. The renderer uploads the finished MP4 to a private output prefix in R2, verifies size/content type/checksum, and reports only the job ID and output object key to an authenticated Worker callback.
-7. The Worker verifies callback authentication and job ownership, records completion in KV (or D1 if transactional coordination is required), and returns a short-lived download URL only to the owning account.
-8. YouTube upload remains a separate action requiring explicit approval for the exact video and title; visibility remains private.
+- Cloudflare Worker: `phn-youtube-mcp`.
+- Railway project: `NEXUS Universe Renderer`; service: `nexus-ffmpeg-renderer`.
+- Railway object bucket: private S3-compatible storage, configured for virtual-host addressing in Singapore.
+- Railway persistent volume: mounted at `/work` for job records and rendered outputs.
+- The renderer exposes HTTPS endpoints protected by short-lived signed credentials. Its public HTTPS ingress is not private-network-only; authentication and tenant/project authorization are therefore mandatory.
+- The service must remain at one replica. Its in-memory queue is not distributed and does not coordinate multiple processes.
+- Health checks prove process liveness only. They do not prove object-storage access, render success, output retrieval, or YouTube upload.
 
-## Required security controls before public deployment
+## Verified implementation
 
-- Replace the single shared bearer token with short-lived, audience-bound job credentials or signed requests; bind every job and object key to an account and project.
-- Keep the renderer private behind authenticated service-to-service connectivity. Never expose R2 credentials or Google OAuth tokens to it.
-- Validate manifest schema, asset ownership, MIME type, file size, duration, resolution, frame rate, and total resource budget before enqueueing.
-- Restrict object keys to server-generated account/project prefixes. Never accept arbitrary remote URLs or caller-selected filesystem paths.
-- Add idempotency, durable queue semantics, retry limits, cancellation, concurrency limits, job expiry, and orphaned-object cleanup.
-- Enforce per-account quotas and render timeouts. Keep job logs free of credentials and signed URLs.
-- Authenticate and replay-protect callbacks; make completion handling idempotent.
-- Store outputs privately and use short-lived, owner-authorized download links.
+- Worker-side project ownership checks precede asset transfer, render submission, status retrieval, and output handoff.
+- Asset intake restricts sources to HTTPS `fal.media` hosts, rejects redirects, checks allowed media MIME types, and enforces a 100 MiB transfer limit.
+- Renderer storage code signs S3-compatible PUT and GET requests and uses tenant/project-scoped object keys.
+- Automated storage tests verify signing, virtual-host addressing, and PUT/GET round trips against a mocked storage endpoint.
+- Renderer tests cover manifest validation, signed authorization, job ownership, bounded queue recovery, symlink defenses, and owner-only local file permissions.
+- CI builds the renderer image, runs tests, and performs an FFmpeg smoke test.
+- The deployed renderer health endpoint has returned HTTP 200, and the latest deployment started successfully.
 
-## Infrastructure decisions still required
+## Not yet verified
 
-- Create/select a private R2 bucket and choose its binding name and retention policy.
-- Choose a container host that supports persistent or object-backed job orchestration and private service networking.
-- Decide whether job state remains in KV for the initial single-owner deployment or moves to D1/Queues for transactional and distributed processing.
-- Provision secrets through the host's secret manager only after the architecture and permissions are reviewed.
+- A real PUT and GET against the configured Railway bucket using the deployed credentials.
+- A full authenticated Worker-to-renderer asset transfer using a real synthetic media asset.
+- A successful real FFmpeg job that retrieves private bucket objects, produces an MP4, and returns it through the signed output route.
+- Job persistence and recovery across an actual Railway container restart.
+- A complete Worker-side output handoff to the private YouTube uploader.
+- Provider-level cleanup and lifecycle behavior for orphaned private objects.
+
+Mocked storage tests and a healthy HTTP endpoint must not be described as proof of those live integrations.
+
+## Remaining production risks and limits
+
+- The job queue is single-process, in-memory, and limited to one concurrent render by default; one replica is required.
+- There are no distributed queue semantics, idempotency keys, cancellation, authenticated callbacks, or multi-replica coordination.
+- Asset transfer buffers up to 100 MiB in the Worker; YouTube upload buffers up to 50 MiB. Do not raise these limits without redesigning memory use.
+- Private object lifecycle cleanup, orphan handling, quotas, and retention policy need implementation and verification.
+- Railway HTTPS ingress is publicly addressable even though the API requires signed authorization. Private-network-only ingress remains a possible hardening improvement.
+- The container entrypoint starts with the privileges needed to prepare mounted directories and then drops privileges to the `node` user. Do not add a Dockerfile `USER node` instruction without validating volume ownership and startup behavior.
 
 ## Rollout gates
 
-1. Local contract tests for job submission, status, completion, retries, and ownership rejection.
-2. Private staging deployment with synthetic assets only.
-3. R2 round-trip test with a non-sensitive sample video.
-4. End-to-end render test with no YouTube upload.
-5. Explicit review before enabling any YouTube upload integration.
+1. Keep the current single-replica limit and preserve signed tenant/project authorization.
+2. Run a deliberately isolated live S3-compatible PUT/GET test with a random test key, then verify deletion. Do not use user media or overwrite existing keys.
+3. Run one synthetic authenticated asset-transfer and render test; verify job status, MP4 MIME type, output bytes, and owner/project isolation.
+4. Verify restart recovery with a disposable test job and confirm the persistent output remains readable.
+5. Review object cleanup, quotas, resource limits, and retention before increasing usage.
+6. Keep YouTube upload private-only and separately approval-gated. Do not merge the draft pull request or enable public publishing without explicit review.
+
+## Operational safety
+
+- Never log or expose API keys, S3 credentials, OAuth tokens, signing secrets, or signed URLs.
+- Do not run live object-storage writes or deletions except for a specifically isolated test key and only with explicit authorization.
+- Do not trigger production restarts, redeployments, scaling, paid services, or public uploads as part of passive verification.
+- Report implementation, deployment, and live-provider verification as separate states.
