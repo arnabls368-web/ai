@@ -66,13 +66,14 @@ export function validateManifest(manifest, assetMap) {
   }
 }
 
-async function resolveAsset(assetRoot, relativePath) {
+async function resolveAsset(assetRoot, relativePath, allowedExtensions) {
   if (typeof relativePath !== "string" || path.isAbsolute(relativePath)) fail("Asset paths must be relative to the asset directory.");
   const root = await realpath(assetRoot);
   const candidate = await realpath(path.resolve(root, relativePath));
   if (candidate !== root && !candidate.startsWith(root + path.sep)) fail("Asset path escapes the configured asset directory.");
   const info = await stat(candidate);
   if (!info.isFile()) fail("Every asset must resolve to a regular file.");
+  if (!allowedExtensions.has(path.extname(candidate).toLowerCase())) fail("Resolved asset target has an unsupported media file type.");
   return candidate;
 }
 
@@ -83,7 +84,7 @@ export async function buildFfmpegArgs(manifest, assetMap, assetRoot, outputPath)
   const args = ["-hide_banner", "-loglevel", "error", "-nostdin", "-y"];
   const inputs = [];
   for (const scene of manifest.tracks.video) {
-    const file = await resolveAsset(assetRoot, assetMap[scene.assetId]);
+    const file = await resolveAsset(assetRoot, assetMap[scene.assetId], new Set([...IMAGE_EXTENSIONS, ...VIDEO_EXTENSIONS]));
     const image = IMAGE_EXTENSIONS.has(path.extname(file).toLowerCase());
     if (image) args.push("-protocol_whitelist", "file", "-loop", "1", "-framerate", String(fps), "-t", String(scene.durationSeconds), "-i", file);
     else args.push("-protocol_whitelist", "file", "-stream_loop", "-1", "-i", file);
@@ -94,12 +95,12 @@ export async function buildFfmpegArgs(manifest, assetMap, assetRoot, outputPath)
   let musicIndex;
   if (manifest.tracks.voiceover) {
     voiceIndex = inputs.length;
-    const file = await resolveAsset(assetRoot, assetMap[manifest.tracks.voiceover.assetId]);
+    const file = await resolveAsset(assetRoot, assetMap[manifest.tracks.voiceover.assetId], AUDIO_EXTENSIONS);
     args.push("-protocol_whitelist", "file", "-i", file);
   }
   if (manifest.tracks.music) {
     musicIndex = inputs.length + (voiceIndex === undefined ? 0 : 1);
-    const file = await resolveAsset(assetRoot, assetMap[manifest.tracks.music.assetId]);
+    const file = await resolveAsset(assetRoot, assetMap[manifest.tracks.music.assetId], AUDIO_EXTENSIONS);
     args.push("-protocol_whitelist", "file", "-stream_loop", "-1", "-i", file);
   }
 
