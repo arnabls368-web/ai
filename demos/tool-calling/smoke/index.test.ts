@@ -78,7 +78,7 @@ describe("Weather Worker Integration Tests", () => {
 
 				results.push(hasExpectedKeyword);
 			} catch (error) {
-				console.error(`Iteration ${i} failed:`, error);
+				console.error("Iteration %d failed:", i, error);
 				results.push(false);
 			}
 		}
