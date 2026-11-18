@@ -127,8 +127,10 @@ export function createRenderJobServer({
   }
 
   async function restoreJobs() {
+    // Railway persistent-volume mount roots may reject chmod even when writable.
+    // Keep the mount's configured permissions and restrict each job directory
+    // individually in persistJob() instead.
     await mkdir(workRoot, { recursive: true, mode: 0o700 });
-    await chmod(workRoot, 0o700);
     const entries = await readdir(workRoot, { withFileTypes: true });
     const restored = [];
     for (const entry of entries) {
