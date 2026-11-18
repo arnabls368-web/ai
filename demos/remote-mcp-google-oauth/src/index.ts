@@ -182,8 +182,22 @@ function createServer() {
       } catch {
         return { isError: true, content: [{ type: "text", text: "Invalid video URL." }] };
       }
-      if (parsedUrl.protocol !== "https:" || parsedUrl.username || parsedUrl.password || parsedUrl.hostname === "localhost" || parsedUrl.hostname.endsWith(".localhost") || parsedUrl.hostname.endsWith(".local") || parsedUrl.hostname === "metadata.google.internal" || /^127\./.test(parsedUrl.hostname) || /^10\./.test(parsedUrl.hostname) || /^192\.168\./.test(parsedUrl.hostname) || /^169\.254\./.test(parsedUrl.hostname) || /^172\.(1[6-9]|2\d|3[01])\./.test(parsedUrl.hostname) || parsedUrl.hostname === "::1" || parsedUrl.hostname.startsWith("[")) {
-        return { isError: true, content: [{ type: "text", text: "Use a public HTTPS video URL." }] };
+      const hostname = parsedUrl.hostname.toLowerCase();
+      // URL canonicalizes legacy IPv4 forms (for example, integer and
+      // shortened addresses) before hostname is read. Reject IP literals
+      // entirely so the upload source must use a public DNS hostname.
+      const isIpLiteral = /^(?:\d{1,3}\.){3}\d{1,3}$/.test(hostname) || hostname.startsWith("[");
+      const isReservedHost = hostname === "localhost" ||
+        hostname.endsWith(".localhost") ||
+        hostname.endsWith(".local") ||
+        hostname.endsWith(".internal") ||
+        hostname.endsWith(".test") ||
+        hostname.endsWith(".invalid") ||
+        hostname.endsWith(".example") ||
+        hostname === "metadata.google.internal";
+      if (parsedUrl.protocol !== "https:" || parsedUrl.username || parsedUrl.password ||
+          parsedUrl.port || isIpLiteral || isReservedHost) {
+        return { isError: true, content: [{ type: "text", text: "Use a public HTTPS video URL on a public DNS hostname and standard HTTPS port." }] };
       }
 
       try {
