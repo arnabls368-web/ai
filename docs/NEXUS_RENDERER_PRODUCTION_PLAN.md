@@ -30,7 +30,8 @@ Status: partially implemented and deployed; production end-to-end verification i
 - Renderer storage code signs S3-compatible PUT and GET requests and uses tenant/project-scoped object keys.
 - Automated storage tests verify signing, virtual-host addressing, and PUT/GET round trips against a mocked storage endpoint.
 - Renderer tests cover manifest validation, signed authorization, job ownership, bounded queue recovery, symlink defenses, and owner-only local file permissions.
-- CI builds the renderer image, runs tests, and performs an FFmpeg smoke test.
+- CI builds the renderer image, runs tests, and performs an FFmpeg smoke test. On commit `0ac05ef0dc52549f4eace14e9ec4006210c3bab0`, general CI, renderer tests/container build/real FFmpeg encode smoke test, Worker type check, and deployment-bundle build all completed successfully.
+- The same commit's Semgrep OSS scan completed successfully but reported 46 blocking findings across the repository. Two findings point to the renderer Dockerfile's root-starting entrypoint/CMD; the entrypoint prepares mounted directories and then drops to `node` with `gosu`. A successful scan means the scan ran, not that findings were cleared. Do not blindly add `USER node` or suppress these findings without validating Railway volume ownership and runtime behavior.
 - The deployed renderer health endpoint has returned HTTP 200, and the latest deployment started successfully.
 
 ## Not yet verified
