@@ -152,10 +152,9 @@ export function createRenderJobServer({
     active += 1;
     job.status = "running";
     job.startedAt = new Date().toISOString();
+    const outputPath = path.join(jobDirectory(job.id), "render.mp4");
     try {
       await persistJob(job);
-      const directory = jobDirectory(job.id);
-      const outputPath = path.join(directory, "render.mp4");
       await renderManifest({
         manifest: job.manifest,
         assetMap: job.assetMap,
@@ -168,6 +167,7 @@ export function createRenderJobServer({
       job.outputBytes = output.size;
       job.completedAt = new Date().toISOString();
     } catch (error) {
+      await rm(outputPath, { force: true }).catch(() => {});
       job.status = "failed";
       job.error = String(error?.message ?? error).slice(0, 1000);
       job.completedAt = new Date().toISOString();
