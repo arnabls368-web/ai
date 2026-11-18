@@ -2,7 +2,7 @@ const RENDERER_AUDIENCE = "nexus-renderer";
 const MAX_RENDER_TOKEN_TTL_SECONDS = 300;
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
-type RenderScope = "render:submit" | "render:read";
+type RenderScope = "render:submit" | "render:read" | "asset:write";
 
 function base64UrlEncode(bytes: Uint8Array): string {
   let binary = "";
@@ -96,8 +96,10 @@ export async function callPrivateRenderer({
     throw new Error("Invalid private renderer path.");
   }
   if ((method === "POST" && scope !== "render:submit") ||
-      (method === "GET" && scope !== "render:read")) {
-    throw new Error("Renderer request method does not match its authorization scope.");
+      (method === "PUT" && scope !== "asset:write") ||
+      (method === "GET" && scope !== "render:read") ||
+      (body !== undefined && rawBody !== undefined)) {
+    throw new Error("Renderer request method or body does not match its authorization scope.");
   }
   const token = await createRenderAuthorizationToken({
     secret, tenantId, projectId, scope,
@@ -107,10 +109,12 @@ export async function callPrivateRenderer({
   if (body !== undefined) {
     requestBody = JSON.stringify(body);
     headers.set("Content-Type", "application/json");
+  } else if (rawBody !== undefined) {
+    headers.set("Content-Type", contentType ?? "application/octet-stream");
   }
   const target = new URL(path, base);
   if (target.origin !== base.origin || !target.pathname.startsWith(base.pathname.replace(/\/$/, "") + "/")) {
     throw new Error("Renderer path escaped its configured base URL.");
   }
-  return fetch(target, { method, headers, body: requestBody, redirect: "error", signal: AbortSignal.timeout(20_000) });
+  return fetch(target, { method, headers, body: rawBody ?? requestBody, redirect: "error", signal: AbortSignal.timeout(120_000) });
 }
