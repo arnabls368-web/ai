@@ -74,8 +74,8 @@ app.post("/authorize", async (c) => {
 		// Read form data once
 		const formData = await c.req.raw.formData();
 
-		// Validate CSRF token
-		validateCSRFToken(formData, c.req.raw);
+		// Validate CSRF token and clear the one-time token cookie on success.
+		const { clearCookie: clearCsrfCookie } = validateCSRFToken(formData, c.req.raw);
 
 		// Extract state from form data
 		const encodedState = formData.get("state");
@@ -109,6 +109,7 @@ app.post("/authorize", async (c) => {
 		const headers = new Headers();
 		headers.append("Set-Cookie", approvedClientCookie);
 		headers.append("Set-Cookie", sessionBindingCookie);
+		headers.append("Set-Cookie", clearCsrfCookie);
 
 		return redirectToGoogle(c.req.raw, c.env, stateToken, headers);
 	} catch (error: any) {
@@ -205,6 +206,7 @@ app.get("/callback", async (c) => {
 		headers: {
 			Authorization: `Bearer ${accessToken}`,
 		},
+		redirect: "error",
 	});
 	if (!userResponse.ok) {
 		return c.text(`Failed to fetch user info: ${await userResponse.text()}`, 500);
