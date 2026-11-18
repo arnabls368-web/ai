@@ -137,10 +137,15 @@ export function registerProviderTools(server: McpServer) {
         if (typeof inputJson !== "string" || inputJson.length > 12_000) {
           throw new Error("Generation input exceeds the 12,000-character approval display limit; reduce it before requesting generation.");
         }
+        const approvalDigest = await crypto.subtle.digest(
+          "SHA-256",
+          new TextEncoder().encode(account + "\\n" + endpointId + "\\n" + inputJson),
+        );
+        const approvalKey = "fal-generation-" + Array.from(new Uint8Array(approvalDigest), (value) => value.toString(16).padStart(2, "0")).join("");
         const approval = requestHumanApproval(
           ctx,
-          "fal-generation-approval",
-          "PAID fal.ai generation approval\n" +
+          approvalKey,
+          "PAID fal.ai generation approval\\n" +
           "Google account: " + account + "\n" +
           "Endpoint: " + endpointId + "\n" +
           "Exact input JSON:\n" + inputJson + "\n" +
