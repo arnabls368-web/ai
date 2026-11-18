@@ -82,3 +82,54 @@ test("uses Railway bucket virtual-host addressing when configured", async () => 
     }
   }
 });
+
+test("round-trips private assets through the signed S3-compatible PUT and GET paths", async () => {
+  const keys = ["AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION", "AWS_S3_URL_STYLE"];
+  const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  const originalFetch = globalThis.fetch;
+  const stored = new Map();
+  const requests = [];
+  try {
+    process.env.AWS_ENDPOINT_URL = "https://objects.example.test";
+    process.env.AWS_S3_BUCKET_NAME = "nexus-private";
+    process.env.AWS_ACCESS_KEY_ID = "test-access";
+    process.env.AWS_SECRET_ACCESS_KEY = "test-secret";
+    process.env.AWS_DEFAULT_REGION = "auto";
+    process.env.AWS_S3_URL_STYLE = "virtual-host";
+    globalThis.fetch = async (url, init) => {
+      const key = String(url);
+      requests.push({ url: key, method: init.method, authorization: init.headers.get("authorization") });
+      if (init.method === "PUT") {
+        stored.set(key, Buffer.from(init.body));
+        return new Response(null, { status: 200 });
+      }
+      if (init.method === "GET" && stored.has(key)) {
+        return new Response(stored.get(key), { status: 200 });
+      }
+      return new Response(null, { status: 404 });
+    };
+    const { putPrivateAsset, getPrivateAsset } = await import("../src/storage.mjs");
+    const source = Buffer.from("NEXUS private asset round-trip");
+    const metadata = await putPrivateAsset({
+      tenantId: "tenant-roundtrip", projectId: "project-roundtrip",
+      assetId: "asset-roundtrip", mimeType: "video/mp4", bytes: source,
+    });
+    const restored = await getPrivateAsset({
+      tenantId: "tenant-roundtrip", projectId: "project-roundtrip",
+      assetId: "asset-roundtrip", extension: metadata.extension,
+    });
+    assert.deepEqual(restored, source);
+    assert.equal(requests.length, 2);
+    assert.deepEqual(requests.map(({ method }) => method), ["PUT", "GET"]);
+    assert.ok(requests.every(({ authorization }) =>
+      authorization.startsWith("AWS4-HMAC-SHA256 Credential=test-access/")));
+    assert.equal(requests[0].url, requests[1].url);
+    assert.match(requests[0].url, /^https:\/\/nexus-private\.objects\.example\.test\/assets\/tenant-roundtrip\/project-roundtrip\//);
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
