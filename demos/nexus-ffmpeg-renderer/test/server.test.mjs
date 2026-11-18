@@ -366,6 +366,46 @@ test("authenticated job submission validates manifests before queueing", async (
   });
 });
 
+test("restart recovery enforces the bounded render queue", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const ids = Array.from({ length: 5 }, (_, index) =>
+      `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`);
+    for (const id of ids) {
+      const directory = path.join(workRoot, id);
+      await mkdir(directory, { recursive: true });
+      await writeFile(path.join(directory, "job.json"), JSON.stringify({
+        id,
+        tenantId: null,
+        projectId: null,
+        status: "queued",
+        createdAt: new Date().toISOString(),
+        ...validPayload(),
+      }));
+    }
+    const restarted = await startServer(workRoot);
+    try {
+      const results = [];
+      for (const id of ids) {
+        let job;
+        for (let attempt = 0; attempt < 200; attempt += 1) {
+          const response = await fetch(`${restarted.base}/jobs/${id}`, {
+            headers: { authorization: `Bearer ${TOKEN}` },
+          });
+          assert.equal(response.status, 200);
+          job = await response.json();
+          if (job.status === "failed" || job.status === "succeeded") break;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        assert.equal(job.status, "failed");
+        results.push(job);
+      }
+      assert.equal(results.filter((job) => /queue capacity was exceeded during service recovery/i.test(job.error ?? "")).length, 2);
+    } finally {
+      await restarted.close();
+    }
+  });
+});
+
 test("restart recovery ignores malformed persisted job manifests", async () => {
   await withWorkRoot(async (workRoot) => {
     const id = "12345678-1234-4234-8234-123456789abc";
