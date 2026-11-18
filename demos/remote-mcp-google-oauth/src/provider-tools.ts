@@ -166,7 +166,7 @@ export function registerProviderTools(server: McpServer) {
           humanApprovalApi,
         );
         if (!approval.approved) {
-          if (approval.inputRequired) return approval.inputRequired;
+          if ("inputRequired" in approval) return approval.inputRequired;
           return failure("Generation was not approved. No fal.ai job was submitted.");
         }
         const apiKey = secret("FAL_KEY");
