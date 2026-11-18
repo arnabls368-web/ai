@@ -248,7 +248,7 @@ function createServer() {
           humanApprovalApi,
         );
         if (!approval.approved) {
-          if (approval.inputRequired) return approval.inputRequired;
+          if ("inputRequired" in approval) return approval.inputRequired;
           return { isError: true, content: [{ type: "text", text: "YouTube upload was not approved. No upload session was started." }] };
         }
         const uploaded = await uploadToYouTube(videoBytes, mimeType, title, description || "", privacyStatus, auth.accessToken, auth.refreshToken);
