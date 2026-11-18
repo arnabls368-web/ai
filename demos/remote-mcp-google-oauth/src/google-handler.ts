@@ -207,6 +207,7 @@ app.get("/callback", async (c) => {
 			Authorization: `Bearer ${accessToken}`,
 		},
 		redirect: "error",
+		signal: AbortSignal.timeout(20_000),
 	});
 	if (!userResponse.ok) {
 		console.error("Google userinfo request failed:", userResponse.status);
