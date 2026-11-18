@@ -11,7 +11,7 @@ A small, provider-neutral FFmpeg rendering engine for NEXUS. It consumes the per
 - Optional voiceover and background music.
 - Optional music ducking under narration.
 - H.264 video, AAC audio and fast-start MP4 output.
-- Validates local asset paths and rejects symlinks escaping the asset directory.
+- Validates local asset paths and rejects symlinks escaping the asset directory.\n- Allows only explicit image/video/audio file extensions; playlist and manifest-based media inputs are rejected.\n- Restricts FFmpeg input protocols to local files and disables interactive stdin.
 - Uses `spawn` with argument arrays; it does not interpolate user input into a shell command.
 
 ## Run locally
@@ -79,7 +79,7 @@ The API rejects expired, altered, wrong-scope and wrong-tenant/project credentia
 
 For local development only, if `NEXUS_RENDER_SIGNING_SECRET` is absent, the service may accept the legacy `NEXUS_RENDER_TOKEN` shared bearer credential. The fallback is automatically disabled when `NODE_ENV=production`; production startup fails unless `NEXUS_RENDER_SIGNING_SECRET` is configured. This is deliberately fail-closed and is not suitable to work around by setting production mode off on a public host.
 
-The API limits request bodies to 1 MiB, persists job metadata and queued work as atomic JSON files under `NEXUS_RENDER_WORKDIR`, retries jobs interrupted while running when the service restarts, keeps at most 100 terminal job records, and runs at most one render by default. Mount `/work` on persistent storage; without that persistent mount, job state and output files are lost when the container is removed. Mount a trusted asset directory read-only. Do not put signing secrets or tokens in source control or logs.
+The API limits request bodies to 1 MiB, persists job metadata and queued work as atomic JSON files under `NEXUS_RENDER_WORKDIR`, retries jobs interrupted while running when the service restarts, keeps at most 100 terminal job records, and runs at most one render by default. Mount `/work` on persistent storage; without that persistent mount, job state and output files are lost when the container is removed. Mount a trusted asset directory read-only. For isolated local rendering, add `--read-only --cap-drop=ALL --security-opt=no-new-privileges --pids-limit=128` and a bounded writable `/tmp` tmpfs. Do not use `--network=none` for a hosted API that must accept private service traffic; enforce private ingress at the container host instead. Do not put signing secrets or tokens in source control or logs.
 
 
 ### Worker-side signed connectivity check
