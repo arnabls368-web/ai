@@ -172,6 +172,47 @@ test("restart recovery rejects symlinked completed render outputs", async () => 
     }
   });
 });
+test("output download refuses symlink replacement after job completion", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const assetRoot = path.join(workRoot, "assets");
+    await mkdir(assetRoot, { recursive: true });
+    await writeFile(path.join(assetRoot, "scene.jpg"), "image");
+    const fakeFfmpeg = path.join(workRoot, "fake-ffmpeg");
+    await writeFile(fakeFfmpeg, "#!/usr/bin/env node\\nconst fs = require('node:fs');\\nfs.writeFileSync(process.argv.at(-1), 'fake mp4 output');\\n");
+    await chmod(fakeFfmpeg, 0o700);
+    const instance = await startServer(workRoot, { ffmpegPath: fakeFfmpeg });
+    try {
+      const submitted = await fetch(`${instance.base}/jobs`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify(validPayload()),
+      });
+      assert.equal(submitted.status, 202);
+      const { id } = await submitted.json();
+      let job;
+      for (let attempt = 0; attempt < 500; attempt += 1) {
+        const status = await fetch(`${instance.base}/jobs/${id}`, { headers: { authorization: `Bearer ${TOKEN}` } });
+        job = await status.json();
+        if (job.status === "succeeded" || job.status === "failed") break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.equal(job.status, "succeeded");
+      const outputPath = path.join(workRoot, id, "render.mp4");
+      const externalFile = path.join(workRoot, "outside-download.mp4");
+      await rm(outputPath, { force: true });
+      await writeFile(externalFile, "must not be served");
+      await symlink(externalFile, outputPath);
+      const download = await fetch(`${instance.base}/jobs/${id}/output`, {
+        headers: { authorization: `Bearer ${TOKEN}` },
+      });
+      assert.equal(download.status, 500);
+      assert.equal(await download.text().then((body) => body.includes("must not be served")), false);
+    } finally {
+      await instance.close();
+    }
+  });
+});
+
 test("render execution rejects symlink output paths", async () => {
   await withWorkRoot(async (workRoot) => {
     const assetRoot = path.join(workRoot, "assets");
