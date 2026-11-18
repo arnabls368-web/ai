@@ -509,6 +509,34 @@ test("restart recovery ignores malformed persisted job manifests", async () => {
   });
 });
 
+test("restart recovery rejects NUL bytes in persisted asset paths", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const id = "12345678-1234-4234-8234-123456789abd";
+    const directory = path.join(workRoot, id);
+    await mkdir(directory, { recursive: true });
+    const payload = validPayload();
+    payload.assetMap.scene = "scene\0.jpg";
+    await writeFile(path.join(directory, "job.json"), JSON.stringify({
+      id,
+      tenantId: null,
+      projectId: null,
+      status: "queued",
+      createdAt: new Date().toISOString(),
+      manifest: payload.manifest,
+      assetMap: payload.assetMap,
+    }));
+    const restarted = await startServer(workRoot);
+    try {
+      const response = await fetch(`${restarted.base}/jobs/${id}`, {
+        headers: { authorization: `Bearer ${TOKEN}` },
+      });
+      assert.equal(response.status, 404);
+    } finally {
+      await restarted.close();
+    }
+  });
+});
+
 test("job status survives a render-service restart", async () => {
   await withWorkRoot(async (workRoot) => {
     const first = await startServer(workRoot);
