@@ -84,6 +84,7 @@ export function createRenderJobServer({
   const jobs = new Map();
   const queue = [];
   let active = 0;
+  let pendingSubmissions = 0;
 
   function jobDirectory(id) {
     if (!UUID_PATTERN.test(id)) throw new Error("Invalid job ID.");
@@ -248,9 +249,14 @@ export function createRenderJobServer({
         try {
           const contentType = String(request.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
           if (contentType !== "application/json") return json(response, 415, { error: "content-type must be application/json" });
-          if (queue.length + active >= MAX_QUEUE_SIZE) {
+          if (queue.length + active + pendingSubmissions >= MAX_QUEUE_SIZE) {
             return json(response, 429, { error: "render queue is full" });
           }
+          // Reserve capacity before the first await so concurrent requests cannot
+          // all pass the limit check while their request bodies or job records persist.
+          pendingSubmissions += 1;
+          let enqueued = false;
+          try {
           const body = await readJson(request);
           if (!body || typeof body !== "object" || Array.isArray(body) ||
               !body.manifest || typeof body.manifest !== "object" ||
@@ -282,12 +288,16 @@ export function createRenderJobServer({
           await persistJob(job);
           jobs.set(id, job);
           queue.push(job);
+          enqueued = true;
+          pendingSubmissions -= 1;
           await pruneJobs();
           pump();
           return json(response, 202, { id, status: job.status, statusUrl: `/jobs/${id}` });
-        } catch (error) {
-          return json(response, error.status ?? 400, { error: error.message });
-        }
+          } catch (error) {
+            return json(response, error.status ?? 400, { error: error.message });
+          } finally {
+            if (!enqueued) pendingSubmissions -= 1;
+          }
       }
 
       const match = url.pathname.match(/^\/jobs\/([0-9a-f-]{36})(\/output)?$/i);
