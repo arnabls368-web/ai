@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import OAuthProvider from "@cloudflare/workers-oauth-provider";
-import { McpServer } from "@modelcontextprotocol/server";
+import { acceptedContent, inputRequired, inputResponse, McpServer } from "@modelcontextprotocol/server";
 import { createMcpHandler, getMcpAuthContext } from "agents/mcp/server";
 import { z } from "zod";
 import { GoogleHandler } from "./google-handler";
@@ -20,6 +20,19 @@ export type Props = {
 };
 
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
+
+const humanApprovalSchema = z.object({ confirm: z.boolean() });
+const humanApprovalApi = {
+  acceptedContent,
+  inputRequired,
+  inputResponse,
+  approvalSchema: humanApprovalSchema,
+  approvalWireSchema: {
+    type: "object",
+    properties: { confirm: { type: "boolean", title: "I approve this exact operation" } },
+    required: ["confirm"],
+  },
+};
 
 /** Read an untrusted video response without ever buffering more than the upload limit. */
 async function readVideoBodyBounded(response: Response): Promise<ArrayBuffer> {
@@ -232,6 +245,7 @@ function createServer() {
             "Visibility: private",
             "Confirm only if you approve uploading these exact video bytes and metadata to this Google account.",
           ].join("\n"),
+          humanApprovalApi,
         );
         if (!approval.approved) {
           if (approval.inputRequired) return approval.inputRequired;
