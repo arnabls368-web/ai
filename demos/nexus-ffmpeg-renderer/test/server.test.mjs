@@ -1,4 +1,5 @@
 import test from "node:test";
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -25,12 +26,13 @@ async function startServer(workRoot, { ffmpegPath } = {}) {
   };
 }
 
-async function startSignedServer(workRoot) {
+async function startSignedServer(workRoot, { ffmpegPath } = {}) {
   const server = createRenderJobServer({
     token: "",
     signingSecret: SIGNING_SECRET,
     assetRoot: path.join(workRoot, "assets"),
     workRoot,
+    ffmpegPath,
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
@@ -496,6 +498,74 @@ test("concurrent live submissions reserve queue capacity atomically", async () =
       }
     } finally {
       await instance.close();
+    }
+  });
+});
+
+test("restart recovery removes stale partial private-asset downloads before retrying", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const keys = ["AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION", "AWS_S3_URL_STYLE"];
+    const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    const originalFetch = globalThis.fetch;
+    const id = "12345678-1234-4234-8234-123456789abe";
+    const assetRoot = path.join(workRoot, "assets");
+    const temporaryAssetRoot = path.join(assetRoot, id);
+    const localAsset = createHash("sha256").update("scene").digest("hex") + ".jpg";
+    try {
+      process.env.AWS_ENDPOINT_URL = "https://objects.example.test";
+      process.env.AWS_S3_BUCKET_NAME = "nexus-private";
+      process.env.AWS_ACCESS_KEY_ID = "test-access";
+      process.env.AWS_SECRET_ACCESS_KEY = "test-secret";
+      process.env.AWS_DEFAULT_REGION = "auto";
+      process.env.AWS_S3_URL_STYLE = "virtual-host";
+
+      await mkdir(temporaryAssetRoot, { recursive: true });
+      await writeFile(path.join(temporaryAssetRoot, localAsset), "partial download");
+      const directory = path.join(workRoot, id);
+      await mkdir(directory, { recursive: true });
+      await writeFile(path.join(directory, "job.json"), JSON.stringify({
+        id,
+        tenantId: "tenant-a",
+        projectId: "project-1",
+        status: "queued",
+        createdAt: new Date().toISOString(),
+        ...validPayload(),
+      }));
+
+      const fakeFfmpeg = path.join(workRoot, "fake-ffmpeg");
+      await writeFile(fakeFfmpeg, "#!/usr/bin/env node\\nconst fs = require('node:fs');\\nfs.writeFileSync(process.argv.at(-1), 'fake mp4 output');\\n");
+      await chmod(fakeFfmpeg, 0o700);
+      let assetFetches = 0;
+      globalThis.fetch = async (url, init) => {
+        if (String(url).startsWith("http://127.0.0.1:")) return originalFetch(url, init);
+        assetFetches += 1;
+        assert.equal(init.method, "GET");
+        return new Response(Buffer.from("restored private image"), { status: 200 });
+      };
+
+      const restarted = await startSignedServer(workRoot, { ffmpegPath: fakeFfmpeg });
+      try {
+        let job;
+        for (let attempt = 0; attempt < 200; attempt += 1) {
+          const response = await fetch(`${restarted.base}/jobs/${id}`, {
+            headers: signedHeader("tenant-a", "project-1", "render:read"),
+          });
+          assert.equal(response.status, 200);
+          job = await response.json();
+          if (job.status === "succeeded" || job.status === "failed") break;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        assert.equal(job.status, "succeeded");
+        assert.equal(assetFetches, 1);
+      } finally {
+        await restarted.close();
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
     }
   });
 });
