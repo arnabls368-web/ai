@@ -55,6 +55,7 @@ export async function fetchUpstreamAuthToken({
     }).toString(),
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     method: "POST",
+    redirect: "error",
   });
   if (!resp.ok) {
     console.error("Google token exchange failed:", resp.status);
@@ -80,6 +81,7 @@ export async function refreshGoogleAccessToken(
       refresh_token: refreshToken,
       grant_type: "refresh_token",
     }),
+    redirect: "error",
   });
   if (!response.ok) return null;
   const body = (await response.json()) as { access_token?: string };
