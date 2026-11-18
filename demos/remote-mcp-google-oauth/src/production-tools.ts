@@ -448,7 +448,7 @@ function registerRendererTools(server: McpServer) {
     "nexus_check_renderer_connection",
     {
       description:
-        "Verify the configured private NEXUS renderer using a short-lived signed credential bound to the authenticated Google account and an owned project. This checks connectivity only; it does not submit a render or transfer assets.",
+        "Verify the configured NEXUS renderer using a short-lived signed credential bound to the authenticated Google account and an owned project. This checks connectivity only; it does not submit a render.",
       inputSchema: z.object({ projectId: z.string().uuid() }),
     },
     async ({ projectId }) => {
@@ -458,40 +458,19 @@ function registerRendererTools(server: McpServer) {
         if (!project) throw new Error("Project not found for this account.");
         const baseUrl = env.NEXUS_RENDERER_URL;
         const secret = env.NEXUS_RENDER_SIGNING_SECRET;
-        if (!baseUrl || !secret) {
-          return {
-            content: [{
-              type: "text" as const,
-              text: JSON.stringify({
-                status: "not_configured",
-                rendererUrlConfigured: Boolean(baseUrl),
-                signingSecretConfigured: Boolean(secret),
-                nextRequirement: "Configure the private renderer URL and matching signing secret as Worker secrets after the private renderer host is provisioned.",
-                renderSubmissionEnabled: false,
-              }, null, 2),
-            }],
-          };
-        }
+        if (!baseUrl || !secret) throw new Error("The private renderer URL and signing secret are not configured.");
         const response = await callPrivateRenderer({
-          baseUrl,
-          secret,
-          tenantId: owner,
-          projectId,
-          scope: "render:read",
-          path: "/auth-check",
-          method: "GET",
+          baseUrl, secret, tenantId: owner, projectId,
+          scope: "render:read", path: "/auth-check", method: "GET",
         });
         if (!response.ok) {
           const status = response.status;
           await response.body?.cancel();
           throw new Error(`Private renderer authorization check failed (HTTP ${status}).`);
         }
-        let result: { ok?: boolean; service?: string; authorization?: string; scope?: string };
-        try {
-          result = await readJsonLimited(response, 65_536) as typeof result;
-        } catch {
-          throw new Error("Private renderer returned an invalid authorization-check response.");
-        }
+        const result = await readJsonLimited(response, 65_536) as {
+          ok?: boolean; service?: string; authorization?: string; scope?: string;
+        };
         if (result.ok !== true || result.authorization !== "signed" || result.scope !== "render:read") {
           throw new Error("Private renderer returned an unexpected authorization-check response.");
         }
@@ -503,8 +482,122 @@ function registerRendererTools(server: McpServer) {
               service: result.service,
               signedAuthorization: true,
               tenantAndProjectBound: true,
+              assetTransferEnabled: true,
               renderSubmissionEnabled: false,
-              nextRequirement: "Private R2 asset transfer and trusted asset-ID resolution must be implemented before render submission is enabled.",
+              nextRequirement: "Complete the Worker-side render submission, polling and output handoff workflow.",
+            }, null, 2),
+          }],
+        };
+      } catch (error) {
+        return projectError(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "nexus_transfer_render_asset",
+    {
+      description:
+        "Transfer a generated NEXUS media asset from a trusted fal.media HTTPS URL into the authenticated project's private Railway S3 bucket through the signed renderer gateway. This downloads and stores the asset but does not generate media or render a video.",
+      inputSchema: z.object({
+        projectId: z.string().uuid(),
+        assetId: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/),
+        assetUrl: z.string().url(),
+      }),
+    },
+    async ({ projectId, assetId, assetUrl }) => {
+      try {
+        const owner = await getProjectScope();
+        const project = await env.OAUTH_KV.get<NexusProject>(projectKey(owner, projectId), "json");
+        if (!project) throw new Error("Project not found for this account.");
+        const sourceUrl = new URL(assetUrl);
+        const host = sourceUrl.hostname.toLowerCase();
+        if (sourceUrl.protocol !== "https:" || sourceUrl.username || sourceUrl.password ||
+            sourceUrl.port || sourceUrl.hash ||
+            !(host === "fal.media" || host.endsWith(".fal.media"))) {
+          throw new Error("Asset URL must be a direct HTTPS URL hosted on fal.media.");
+        }
+        const source = await fetch(sourceUrl.toString(), {
+          redirect: "error",
+          signal: AbortSignal.timeout(120_000),
+        });
+        if (!source.ok) {
+          const status = source.status;
+          await source.body?.cancel();
+          throw new Error(`Could not download generated asset (HTTP ${status}).`);
+        }
+        const mimeType = (source.headers.get("Content-Type") || "").split(";")[0].trim().toLowerCase();
+        const allowedTypes = new Set([
+          "image/jpeg", "image/png", "image/webp", "image/bmp", "image/tiff",
+          "video/mp4", "video/quicktime", "video/webm", "video/x-matroska",
+          "audio/mpeg", "audio/wav", "audio/x-wav", "audio/mp4", "audio/aac", "audio/ogg", "audio/flac",
+        ]);
+        if (!allowedTypes.has(mimeType)) {
+          await source.body?.cancel();
+          throw new Error("Generated asset has an unsupported media type.");
+        }
+        if (!source.body) throw new Error("Generated asset response has no readable body.");
+        const reader = source.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let total = 0;
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            total += value.byteLength;
+            if (total > 100 * 1024 * 1024) {
+              await reader.cancel("Asset exceeds the 100 MiB limit.");
+              throw new Error("Generated asset exceeds the 100 MiB transfer limit.");
+            }
+            chunks.push(value);
+          }
+        } finally {
+          reader.releaseLock();
+        }
+        if (!total) throw new Error("Generated asset is empty.");
+        const bytes = new Uint8Array(total);
+        let offset = 0;
+        for (const chunk of chunks) {
+          bytes.set(chunk, offset);
+          offset += chunk.byteLength;
+        }
+        const baseUrl = env.NEXUS_RENDERER_URL;
+        const secret = env.NEXUS_RENDER_SIGNING_SECRET;
+        if (!baseUrl || !secret) throw new Error("The private renderer URL and signing secret are not configured.");
+        const stored = await callPrivateRenderer({
+          baseUrl,
+          secret,
+          tenantId: owner,
+          projectId,
+          scope: "asset:write",
+          path: "/assets/" + encodeURIComponent(assetId),
+          method: "PUT",
+          rawBody: bytes.buffer,
+          contentType: mimeType,
+        });
+        if (!stored.ok) {
+          const status = stored.status;
+          await stored.body?.cancel();
+          throw new Error(`Private asset storage failed (HTTP ${status}).`);
+        }
+        const result = await readJsonLimited(stored, 65_536) as {
+          assetId?: string; filename?: string; bytes?: number; storage?: string;
+        };
+        if (result.assetId !== assetId || typeof result.filename !== "string" ||
+            result.storage !== "private_object_storage" || result.bytes !== total) {
+          throw new Error("Private asset storage returned an unexpected confirmation.");
+        }
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              status: "asset_stored",
+              projectId,
+              assetId,
+              filename: result.filename,
+              bytes: result.bytes,
+              storage: result.storage,
+              note: "The asset is stored privately and can be referenced in a render manifest. No render was started.",
             }, null, 2),
           }],
         };
