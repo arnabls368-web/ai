@@ -7,6 +7,7 @@ import { GoogleHandler } from "./google-handler";
 import { readJsonLimited, refreshGoogleAccessToken } from "./utils";
 import { registerProductionTools } from "./production-tools";
 import { registerProviderTools } from "./provider-tools";
+import { callPrivateRenderer } from "./render-auth";
 
 export type Props = {
   name: string;
@@ -157,81 +158,58 @@ function createServer() {
   server.registerTool(
     "youtube_upload_video",
     {
-      description:
-        "Upload a finished video from a publicly reachable HTTPS video URL to the authenticated YouTube channel. Videos are private only. Before invoking this tool, obtain the user's explicit approval for this exact video and title, then set userApprovalConfirmed=true. Never infer approval from a general request to automate the channel. Maximum file size: 50 MB.",
+      description: "Upload a finished video to the authenticated YouTube channel. Accepts either a public HTTPS video URL or a completed NEXUS private renderer job belonging to the authenticated Google account. Videos are private only. Obtain explicit approval for this exact video and title before invoking. Maximum file size: 50 MB.",
       inputSchema: z.object({
-        videoUrl: z.string().url().describe("Direct HTTPS URL to the finished video file"),
+        videoUrl: z.string().url().optional(),
+        projectId: z.string().uuid().optional(),
+        renderJobId: z.string().uuid().optional(),
         title: z.string().min(1).max(100),
         description: z.string().max(5000).optional(),
         privacyStatus: z.literal("private").default("private"),
-        userApprovalConfirmed: z.literal(true).describe("Must be true only after the user explicitly approves this exact video and title in the current conversation."),
-      }),
+        userApprovalConfirmed: z.literal(true),
+      }).refine((input) => {
+        const hasUrl = Boolean(input.videoUrl);
+        const hasRender = Boolean(input.projectId && input.renderJobId);
+        return hasUrl !== hasRender && (!input.projectId || Boolean(input.renderJobId)) && (!input.renderJobId || Boolean(input.projectId));
+      }, "Provide either videoUrl OR both projectId and renderJobId."),
     },
-    async ({ videoUrl, title, description, privacyStatus, userApprovalConfirmed }) => {
+    async ({ videoUrl, projectId, renderJobId, title, description, privacyStatus, userApprovalConfirmed }) => {
       const auth = getMcpAuthContext()?.props as Props | undefined;
-      if (userApprovalConfirmed !== true) {
-        return { isError: true, content: [{ type: "text", text: "Explicit user approval for this exact private upload is required." }] };
-      }
-      if (!auth?.accessToken) {
-        return { isError: true, content: [{ type: "text", text: "YouTube is not connected. Reconnect your Google account." }] };
-      }
-
-      let parsedUrl: URL;
+      if (userApprovalConfirmed !== true) return { isError: true, content: [{ type: "text", text: "Explicit user approval for this exact private upload is required." }] };
+      if (!auth?.accessToken) return { isError: true, content: [{ type: "text", text: "YouTube is not connected. Reconnect your Google account." }] };
       try {
-        parsedUrl = new URL(videoUrl);
-      } catch {
-        return { isError: true, content: [{ type: "text", text: "Invalid video URL." }] };
-      }
-      const hostname = parsedUrl.hostname.toLowerCase();
-      // URL canonicalizes legacy IPv4 forms (for example, integer and
-      // shortened addresses) before hostname is read. Reject IP literals
-      // entirely so the upload source must use a public DNS hostname.
-      const isIpLiteral = /^(?:\d{1,3}\.){3}\d{1,3}$/.test(hostname) || hostname.startsWith("[");
-      const isReservedHost = hostname === "localhost" ||
-        hostname.endsWith(".localhost") ||
-        hostname.endsWith(".local") ||
-        hostname.endsWith(".internal") ||
-        hostname.endsWith(".test") ||
-        hostname.endsWith(".invalid") ||
-        hostname.endsWith(".example") ||
-        hostname === "metadata.google.internal";
-      if (parsedUrl.protocol !== "https:" || parsedUrl.username || parsedUrl.password ||
-          parsedUrl.port || isIpLiteral || isReservedHost) {
-        return { isError: true, content: [{ type: "text", text: "Use a public HTTPS video URL on a public DNS hostname and standard HTTPS port." }] };
-      }
-
-      try {
-        const source = await fetch(parsedUrl.toString(), {
-          redirect: "error",
-          signal: AbortSignal.timeout(120_000),
-        });
-        if (!source.ok) {
-          const status = source.status;
-          await source.body?.cancel();
-          throw new Error(`Could not download video (HTTP ${status}).`);
+        let source: Response;
+        if (projectId && renderJobId) {
+          const email = auth.email?.trim().toLowerCase();
+          if (!email) throw new Error("The authenticated Google account has no verified email scope.");
+          const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(email));
+          const owner = Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
+          const key = "nexus:projects:v1:" + owner + ":" + projectId;
+          const project = await env.OAUTH_KV.get<any>(key, "json");
+          if (!project || project.id !== projectId || project.renderJob?.id !== renderJobId) throw new Error("The render job was not found in a project owned by this Google account.");
+          if (project.renderJob.status !== "succeeded" || project.renderJob.outputUrl !== "/jobs/" + renderJobId + "/output") throw new Error("The NEXUS render job is not confirmed complete or has no verified output endpoint.");
+          const bindings = env as unknown as Record<string, unknown>;
+          if (typeof bindings.NEXUS_RENDERER_URL !== "string" || typeof bindings.NEXUS_RENDER_SIGNING_SECRET !== "string") throw new Error("The private NEXUS renderer is not configured on this Worker.");
+          source = await callPrivateRenderer({
+            baseUrl: bindings.NEXUS_RENDERER_URL, secret: bindings.NEXUS_RENDER_SIGNING_SECRET,
+            tenantId: owner, projectId, scope: "render:read",
+            path: "/jobs/" + renderJobId + "/output", method: "GET",
+          });
+        } else {
+          let parsedUrl: URL;
+          try { parsedUrl = new URL(videoUrl!); } catch { throw new Error("Invalid video URL."); }
+          const hostname = parsedUrl.hostname.toLowerCase();
+          const isIpLiteral = /^(?:\d{1,3}\.){3}\d{1,3}$/.test(hostname) || hostname.startsWith("[");
+          const isReservedHost = hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local") || hostname.endsWith(".internal") || hostname.endsWith(".test") || hostname.endsWith(".invalid") || hostname.endsWith(".example") || hostname === "metadata.google.internal";
+          if (parsedUrl.protocol !== "https:" || parsedUrl.username || parsedUrl.password || parsedUrl.port || isIpLiteral || isReservedHost) throw new Error("Use a public HTTPS video URL on a public DNS hostname and standard HTTPS port.");
+          source = await fetch(parsedUrl.toString(), { redirect: "error", signal: AbortSignal.timeout(120_000) });
         }
-        const mimeType = (source.headers.get("Content-Type") || "").split(";")[0].trim();
-        if (!mimeType.startsWith("video/")) {
-          await source.body?.cancel();
-          throw new Error("The URL must return a video file.");
-        }
+        if (!source.ok) { const status = source.status; await source.body?.cancel(); throw new Error("Could not retrieve video (HTTP " + status + ")."); }
+        const mimeType = (source.headers.get("Content-Type") || "").split(";")[0].trim().toLowerCase();
+        if (mimeType !== "video/mp4" && !(videoUrl && mimeType.startsWith("video/"))) { await source.body?.cancel(); throw new Error("The video source must return an MP4 file."); }
         const videoBytes = await readVideoBodyBounded(source);
-
-        const uploaded = await uploadToYouTube(
-          videoBytes,
-          mimeType,
-          title,
-          description || "",
-          privacyStatus,
-          auth.accessToken,
-          auth.refreshToken,
-        );
-        return {
-          content: [{
-            type: "text",
-            text: `Video uploaded successfully. Video ID: ${uploaded.videoId}. URL: https://www.youtube.com/watch?v=${uploaded.videoId}. Visibility: ${uploaded.privacyStatus}.`,
-          }],
-        };
+        const uploaded = await uploadToYouTube(videoBytes, mimeType, title, description || "", privacyStatus, auth.accessToken, auth.refreshToken);
+        return { content: [{ type: "text", text: "Video uploaded successfully. Video ID: " + uploaded.videoId + ". URL: https://www.youtube.com/watch?v=" + uploaded.videoId + ". Visibility: " + uploaded.privacyStatus + "." }] };
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown upload error";
         return { isError: true, content: [{ type: "text", text: message }] };
