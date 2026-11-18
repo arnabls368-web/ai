@@ -3,6 +3,7 @@ import { z } from "zod";
 import { env } from "cloudflare:workers";
 import { getMcpAuthContext } from "agents/mcp/server";
 import { readJsonLimited } from "./utils";
+import { isFalGenerationFailed } from "./fal-status.mjs";
 
 type RuntimeEnv = Record<string, unknown>;
 
@@ -193,7 +194,7 @@ export function registerProviderTools(server: McpServer) {
         // fal.ai can report FAILED with an error payload. Handle terminal
         // failures before the generic non-COMPLETED branch so diagnostics are
         // not accidentally presented as a job that is still running.
-        if (status.status === "FAILED" || status.error || status.error_type) {
+        if (isFalGenerationFailed(status)) {
           return result({ status: "FAILED", requestId, error: status.error, errorType: status.error_type });
         }
         if (status.status !== "COMPLETED") {
