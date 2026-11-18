@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { hasExactlyOneUploadSource, isVerifiedRenderJob } from "./upload-source.ts";
+import { hasExactlyOneUploadSource, isVerifiedRenderJob } from "./upload-source.mjs";
 
 test("accepts exactly one public URL source", () => {
   assert.equal(hasExactlyOneUploadSource({ videoUrl: "https://cdn.example/video.mp4" }), true);
