@@ -481,8 +481,17 @@ function registerRendererTools(server: McpServer) {
           path: "/auth-check",
           method: "GET",
         });
-        if (!response.ok) throw new Error(`Private renderer authorization check failed (HTTP ${response.status}).`);
-        const result = await response.json() as { ok?: boolean; service?: string; authorization?: string; scope?: string };
+        if (!response.ok) {
+          const status = response.status;
+          await response.body?.cancel();
+          throw new Error(`Private renderer authorization check failed (HTTP ${status}).`);
+        }
+        let result: { ok?: boolean; service?: string; authorization?: string; scope?: string };
+        try {
+          result = await readJsonLimited(response, 65_536) as typeof result;
+        } catch {
+          throw new Error("Private renderer returned an invalid authorization-check response.");
+        }
         if (result.ok !== true || result.authorization !== "signed" || result.scope !== "render:read") {
           throw new Error("Private renderer returned an unexpected authorization-check response.");
         }
