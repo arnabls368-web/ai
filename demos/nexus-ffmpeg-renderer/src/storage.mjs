@@ -1,4 +1,6 @@
 import { createHash, createHmac } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
 
 const MIME_EXTENSIONS = new Map([
   ["image/jpeg", ".jpg"], ["image/png", ".png"], ["image/webp", ".webp"],
@@ -36,7 +38,7 @@ function hmac(key, value, encoding) {
   return createHmac("sha256", key).update(value, "utf8").digest(encoding);
 }
 
-function signedRequest({ method, key, body, contentType }) {
+function signedRequest({ method, key, body, contentType, payloadHash: suppliedPayloadHash, contentLength }) {
   const { bucket, base, region, accessKeyId, secretAccessKey } = config();
   const urlStyle = process.env.AWS_S3_URL_STYLE ?? "path";
   let url;
@@ -51,7 +53,7 @@ function signedRequest({ method, key, body, contentType }) {
     throw new Error("AWS_S3_URL_STYLE must be path or virtual-host.");
   }
   const host = url.host;
-  const payloadHash = body ? createHash("sha256").update(body).digest("hex") : EMPTY_SHA256;
+  const payloadHash = suppliedPayloadHash ?? (body ? createHash("sha256").update(body).digest("hex") : EMPTY_SHA256);
   const amzDate = new Date().toISOString().replace(/[:-]|\.\d{3}/g, "");
   const dateStamp = amzDate.slice(0, 8);
   const headers = {
@@ -60,6 +62,7 @@ function signedRequest({ method, key, body, contentType }) {
     "x-amz-date": amzDate,
   };
   if (contentType) headers["content-type"] = contentType;
+  if (contentLength !== undefined) headers["content-length"] = String(contentLength);
   const signedHeaders = Object.keys(headers).sort().join(";");
   const canonicalHeaders = Object.keys(headers).sort().map((name) =>
     name + ":" + String(headers[name]).trim() + "\n"
@@ -84,6 +87,7 @@ function signedRequest({ method, key, body, contentType }) {
     method,
     headers: requestHeaders,
     body: body ?? undefined,
+    ...(body && !Buffer.isBuffer(body) ? { duplex: "half" } : {}),
     redirect: "error",
     signal: AbortSignal.timeout(120_000),
   });
@@ -116,6 +120,34 @@ export async function putPrivateAsset({ tenantId, projectId, assetId, mimeType, 
   }
   await response.body?.cancel();
   return { key, extension, bytes: bytes.length };
+}
+
+
+export async function putPrivateAssetFile({ tenantId, projectId, assetId, mimeType, filePath }) {
+  const extension = extensionForMime(mimeType);
+  if (!extension) throw new Error("Unsupported asset media type.");
+  const info = await stat(filePath);
+  if (!info.isFile() || info.size < 1 || info.size > MAX_ASSET_BYTES) {
+    throw new Error("Asset must be between 1 byte and 100 MiB.");
+  }
+  const digest = createHash("sha256");
+  for await (const chunk of createReadStream(filePath)) digest.update(chunk);
+  const key = objectKey(tenantId, projectId, assetId, extension);
+  const response = await signedRequest({
+    method: "PUT",
+    key,
+    body: createReadStream(filePath),
+    contentType: String(mimeType).split(";")[0].trim().toLowerCase(),
+    payloadHash: digest.digest("hex"),
+    contentLength: info.size,
+  });
+  if (!response.ok) {
+    const status = response.status;
+    await response.body?.cancel();
+    throw new Error("Private object storage rejected asset upload (HTTP " + status + ").");
+  }
+  await response.body?.cancel();
+  return { key, extension, bytes: info.size };
 }
 
 export async function getPrivateAsset({ tenantId, projectId, assetId, extension }) {
