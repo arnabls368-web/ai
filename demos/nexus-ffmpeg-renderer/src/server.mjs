@@ -11,6 +11,7 @@ import { verifyRenderToken } from "./auth.mjs";
 const MAX_BODY_BYTES = 1024 * 1024;
 const MAX_RETAINED_JOBS = 100;
 const MAX_QUEUE_SIZE = 3;
+const MAX_CONCURRENT_ASSET_UPLOADS = 2;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function json(response, status, value) {
@@ -109,6 +110,7 @@ export function createRenderJobServer({
   const queue = [];
   let active = 0;
   let pendingSubmissions = 0;
+  let activeAssetUploads = 0;
 
   function jobDirectory(id) {
     if (!UUID_PATTERN.test(id)) throw new Error("Invalid job ID.");
@@ -301,6 +303,10 @@ export function createRenderJobServer({
         if (claims.legacy || !claims.tenantId || !claims.projectId) return json(response, 401, { error: "signed project authorization required" });
         const mimeType = String(request.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
         if (!extensionForMime(mimeType)) return json(response, 415, { error: "unsupported asset media type" });
+        if (activeAssetUploads >= MAX_CONCURRENT_ASSET_UPLOADS) {
+          return json(response, 429, { error: "asset upload capacity is full" });
+        }
+        activeAssetUploads += 1;
         try {
           const uploadDirectory = await mkdtemp(path.join(tmpdir(), "nexus-asset-upload-"));
           const uploadPath = path.join(uploadDirectory, "asset");
@@ -319,6 +325,8 @@ export function createRenderJobServer({
           }
         } catch (error) {
           return json(response, error.status ?? 502, { error: String(error?.message ?? error).slice(0, 500) });
+        } finally {
+          activeAssetUploads -= 1;
         }
       }
 
