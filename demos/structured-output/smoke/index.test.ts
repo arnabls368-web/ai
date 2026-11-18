@@ -78,7 +78,7 @@ describe("Structured Outputs Integration Tests", () => {
 					const { success } = schema.safeParse(data);
 					results.push(success);
 				} catch (error) {
-					console.error(`Iteration ${i} failed:`, error);
+					console.error("Iteration %d failed:", i, error);
 					results.push(false);
 				}
 			}
