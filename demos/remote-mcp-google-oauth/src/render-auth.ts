@@ -99,10 +99,11 @@ export async function callPrivateRenderer({
   if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\") || path.includes("..")) {
     throw new Error("Invalid private renderer path.");
   }
-  if ((method === "POST" && scope !== "render:submit") ||
-      (method === "PUT" && scope !== "asset:write") ||
-      (method === "GET" && scope !== "render:read") ||
-      (body !== undefined && rawBody !== undefined)) {
+  const validRequestShape =
+    (method === "GET" && scope === "render:read" && body === undefined && rawBody === undefined) ||
+    (method === "POST" && scope === "render:submit" && body !== undefined && rawBody === undefined) ||
+    (method === "PUT" && scope === "asset:write" && body === undefined && rawBody !== undefined);
+  if (!validRequestShape) {
     throw new Error("Renderer request method or body does not match its authorization scope.");
   }
   const token = await createRenderAuthorizationToken({
