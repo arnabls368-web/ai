@@ -109,6 +109,16 @@ export function registerProductionTools(server: McpServer) {
         .replace(/\s+/g, " ")
         .match(/[^.!?]+[.!?]+|[^.!?]+$/g) ?? [script];
       const sceneCount = Math.max(1, Math.ceil(targetDurationSeconds / maxSceneSeconds));
+      if (sceneCount > 500) {
+        const minimumSceneSeconds = Math.ceil(targetDurationSeconds / 500);
+        return {
+          isError: true,
+          content: [{
+            type: "text" as const,
+            text: `This storyboard would create ${sceneCount} scenes, but the renderer supports at most 500. Increase maxSceneSeconds to at least ${minimumSceneSeconds} seconds or reduce the target duration.`,
+          }],
+        };
+      }
       const scenes = Array.from({ length: sceneCount }, (_, index) => {
         const start = Math.floor((index * sentences.length) / sceneCount);
         const end = Math.floor(((index + 1) * sentences.length) / sceneCount);
@@ -235,6 +245,9 @@ export function registerProductionTools(server: McpServer) {
         }
         if (!project.storyboard) throw new Error("Create and save a storyboard before preparing a render manifest.");
         const storyboardScenes = project.storyboard.scenes;
+        if (storyboardScenes.length < 1 || storyboardScenes.length > 500) {
+          throw new Error("The saved storyboard has an unsupported scene count. Create a storyboard with 1–500 scenes before preparing a render manifest.");
+        }
         const assetByScene = new Map<number, { assetId: string; fit: "cover" | "contain" }>();
         for (const asset of sceneAssets) {
           if (assetByScene.has(asset.scene)) throw new Error(`Duplicate asset mapping for scene ${asset.scene}.`);
