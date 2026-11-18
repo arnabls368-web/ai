@@ -807,7 +807,13 @@ async function getApprovedClientsFromCookie(
 	if (parts.length !== 2) return null;
 
 	const [signatureHex, base64Payload] = parts;
-	const payload = atob(base64Payload);
+	let payload: string;
+	try {
+		payload = atob(base64Payload);
+	} catch {
+		// Treat malformed or non-base64 cookie data as an unapproved client.
+		return null;
+	}
 
 	const isValid = await verifySignature(signatureHex, payload, cookieSecret);
 
