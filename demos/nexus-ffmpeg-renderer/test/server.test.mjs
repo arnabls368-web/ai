@@ -1,7 +1,7 @@
 import test from "node:test";
 import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createRenderJobServer } from "../src/server.mjs";
@@ -556,6 +556,20 @@ test("restart recovery removes stale partial private-asset downloads before retr
           await new Promise((resolve) => setTimeout(resolve, 10));
         }
         assert.equal(job.status, "succeeded");
+        // The API exposes the in-memory terminal state before the finally block
+        // has completed its cleanup and persisted the final job record. Wait for
+        // that durable record before closing the server and removing the fixture.
+        let persistedJob;
+        for (let attempt = 0; attempt < 200; attempt += 1) {
+          try {
+            persistedJob = JSON.parse(await readFile(path.join(workRoot, id, "job.json"), "utf8"));
+          } catch {
+            // The first atomic write may still be in progress.
+          }
+          if (persistedJob?.status === "succeeded") break;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        assert.equal(persistedJob?.status, "succeeded");
         assert.equal(assetFetches, 1);
       } finally {
         await restarted.close();
