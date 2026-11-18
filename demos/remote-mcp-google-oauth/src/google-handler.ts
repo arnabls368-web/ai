@@ -202,13 +202,19 @@ app.get("/callback", async (c) => {
 	const { accessToken, refreshToken } = googleTokens;
 
 	// Fetch the user info from Google
-	const userResponse = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
-		headers: {
-			Authorization: `Bearer ${accessToken}`,
-		},
-		redirect: "error",
-		signal: AbortSignal.timeout(20_000),
-	});
+	let userResponse: Response;
+	try {
+		userResponse = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
+			headers: {
+				Authorization: `Bearer ${accessToken}`,
+			},
+			redirect: "error",
+			signal: AbortSignal.timeout(20_000),
+		});
+	} catch {
+		console.error("Google userinfo request failed or timed out");
+		return c.text("Failed to verify Google account information", 502);
+	}
 	if (!userResponse.ok) {
 		console.error("Google userinfo request failed:", userResponse.status);
 		return c.text("Failed to verify Google account information", 502);
