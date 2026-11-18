@@ -9,11 +9,14 @@ COPY package.json ./
 COPY src ./src
 COPY test ./test
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
-RUN chmod 0755 /app/docker-entrypoint.sh
+RUN chmod 0755 /app/docker-entrypoint.sh \
+  && mkdir -p /assets /work \
+  && chown node:node /assets /work
 
 ENV NODE_ENV=production
 EXPOSE 8080
-# The entrypoint briefly starts as root to prepare Railway-mounted volume ownership,
-# then docker-entrypoint.sh uses gosu to run the application as the unprivileged node user.
+# Railway mounts persistent volumes as root. RAILWAY_RUN_UID=0 lets the
+# entrypoint prepare only the mount roots, then drop the application to node.
+USER node
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["node", "src/server.mjs"]
