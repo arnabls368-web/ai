@@ -40,7 +40,7 @@ test("checks session progress after a lost response and resumes only remaining b
   });
   assert.equal(response.status, 201);
   assert.equal(calls.length, 3);
-  assert.equal(calls[1].headers.get("Content-Range"), "bytes */6");
+  assert.equal(new Headers(calls[1].headers).get("Content-Range"), "bytes */6");
   assert.equal(calls[2].headers.get("Content-Range"), "bytes 3-5/6");
   assert.deepEqual([...new Uint8Array(calls[2].body)], [40, 50, 60]);
 });
