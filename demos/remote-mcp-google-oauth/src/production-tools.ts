@@ -484,9 +484,10 @@ function registerRendererTools(server: McpServer) {
               service: result.service,
               signedAuthorization: true,
               tenantAndProjectBound: true,
-              assetTransferEnabled: true,
-              renderSubmissionEnabled: true,
-              nextRequirement: "Complete the rendered-video output handoff and YouTube upload review flow.",
+              verifiedCapabilities: ["signed-render-read"],
+              assetTransferVerified: false,
+              renderSubmissionVerified: false,
+              nextRequirement: "Asset-write authorization, S3 storage, render submission, and rendered-video output handoff still require end-to-end verification.",
             }, null, 2),
           }],
         };
