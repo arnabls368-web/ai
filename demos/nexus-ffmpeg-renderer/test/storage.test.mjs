@@ -51,3 +51,34 @@ test("uploads tenant-scoped assets with signed S3-compatible requests", async ()
     }
   }
 });
+
+test("uses Railway bucket virtual-host addressing when configured", async () => {
+  const keys = ["AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION", "AWS_S3_URL_STYLE"];
+  const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  const originalFetch = globalThis.fetch;
+  let requestedUrl;
+  try {
+    process.env.AWS_ENDPOINT_URL = "https://objects.example.test";
+    process.env.AWS_S3_BUCKET_NAME = "nexus-private";
+    process.env.AWS_ACCESS_KEY_ID = "test-access";
+    process.env.AWS_SECRET_ACCESS_KEY = "test-secret";
+    process.env.AWS_DEFAULT_REGION = "auto";
+    process.env.AWS_S3_URL_STYLE = "virtual-host";
+    globalThis.fetch = async (url) => {
+      requestedUrl = String(url);
+      return new Response(null, { status: 200 });
+    };
+    const { putPrivateAsset } = await import("../src/storage.mjs");
+    await putPrivateAsset({
+      tenantId: "tenant-a", projectId: "project-1", assetId: "scene-2",
+      mimeType: "image/webp", bytes: Buffer.from("webp"),
+    });
+    assert.match(requestedUrl, /^https:\/\/nexus-private\.objects\.example\.test\/assets\/tenant-a\/project-1\//);
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
