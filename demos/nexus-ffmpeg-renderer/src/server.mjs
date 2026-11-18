@@ -231,6 +231,8 @@ export function createRenderJobServer({
           const id = randomUUID();
           const job = {
             id,
+            tenantId: claims.tenantId,
+            projectId: claims.projectId,
             status: "queued",
             createdAt: new Date().toISOString(),
             manifest: body.manifest,
