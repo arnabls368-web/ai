@@ -12,6 +12,7 @@ import { hasExactlyOneUploadSource, isVerifiedRenderJob } from "./upload-source.
 import { uploadResumableVideo } from "./youtube-resumable.mjs";
 import { requestHumanApproval } from "./human-approval.mjs";
 import { serializeApprovalBinding } from "./approval-binding.mjs";
+import { validateExternalVideoUrl } from "./external-video-url.mjs";
 export { OAuthStateDO } from "./oauth-state-do";
 
 export type Props = {
@@ -203,13 +204,12 @@ function createServer() {
             path: "/jobs/" + renderJobId + "/output", method: "GET",
           });
         } else {
-          let parsedUrl: URL;
-          try { parsedUrl = new URL(videoUrl!); } catch { throw new Error("Invalid video URL."); }
-          const hostname = parsedUrl.hostname.toLowerCase();
-          const isIpLiteral = /^(?:\d{1,3}\.){3}\d{1,3}$/.test(hostname) || hostname.startsWith("[");
-          const isReservedHost = hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local") || hostname.endsWith(".internal") || hostname.endsWith(".test") || hostname.endsWith(".invalid") || hostname.endsWith(".example") || hostname === "metadata.google.internal";
-          if (parsedUrl.protocol !== "https:" || parsedUrl.username || parsedUrl.password || parsedUrl.port || isIpLiteral || isReservedHost) throw new Error("Use a public HTTPS video URL on a public DNS hostname and standard HTTPS port.");
-          source = await fetch(parsedUrl.toString(), { redirect: "error", signal: AbortSignal.timeout(120_000) });
+          const bindings = env as unknown as Record<string, unknown>;
+          const allowedHosts = typeof bindings.YOUTUBE_UPLOAD_ALLOWED_HOSTS === "string"
+            ? bindings.YOUTUBE_UPLOAD_ALLOWED_HOSTS
+            : "";
+          const safeUrl = validateExternalVideoUrl(videoUrl!, allowedHosts);
+          source = await fetch(safeUrl, { redirect: "error", signal: AbortSignal.timeout(120_000) });
         }
         if (!source.ok) { const status = source.status; await source.body?.cancel(); throw new Error("Could not retrieve video (HTTP " + status + ")."); }
         const mimeType = (source.headers.get("Content-Type") || "").split(";")[0].trim().toLowerCase();
