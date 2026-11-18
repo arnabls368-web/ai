@@ -32,7 +32,17 @@ def setup_server(env):
 
     app = mcp.sse_app()
     app.add_exception_handler(HTTPException, http_exception)
-    allowed_origins = [\n        origin.strip()\n        for origin in getattr(env, "CORS_ALLOWED_ORIGINS", "").split(",")\n        if origin.strip()\n    ]\n    app.add_middleware(\n        CORSMiddleware,\n        allow_origins=allowed_origins,\n        allow_methods=["GET", "POST", "OPTIONS"],\n        allow_headers=["authorization", "content-type", "last-event-id", "mcp-protocol-version", "mcp-session-id"],\n    )
+    allowed_origins = [
+        origin.strip()
+        for origin in getattr(env, "CORS_ALLOWED_ORIGINS", "").split(",")
+        if origin.strip()
+    ]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allowed_origins,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["authorization", "content-type", "last-event-id", "mcp-protocol-version", "mcp-session-id"],
+    )
     return mcp, app
 
 
