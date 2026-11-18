@@ -81,6 +81,13 @@ For local development only, if `NEXUS_RENDER_SIGNING_SECRET` is absent, the serv
 
 The API limits request bodies to 1 MiB, persists job metadata and queued work as atomic JSON files under `NEXUS_RENDER_WORKDIR`, retries jobs interrupted while running when the service restarts, keeps at most 100 terminal job records, and runs at most one render by default. Mount `/work` on persistent storage; without that persistent mount, job state and output files are lost when the container is removed. Mount a trusted asset directory read-only. Do not put signing secrets or tokens in source control or logs.
 
+
+### Worker-side signed connectivity check
+
+The Cloudflare Worker contains a matching Web Crypto HMAC-SHA256 token signer and the `nexus_check_renderer_connection` MCP tool. The tool first loads the requested project using the authenticated Google-account owner key, then mints a short-lived read token for that exact tenant/project and calls the renderer's authenticated `GET /auth-check` endpoint. The renderer never trusts a tenant or project supplied by the MCP caller.
+
+The Worker integration is dormant until both `NEXUS_RENDERER_URL` and `NEXUS_RENDER_SIGNING_SECRET` are configured as Worker secrets and a private renderer host exists. The connectivity check does not submit jobs. Actual render submission remains disabled until trusted R2 asset transfer and asset-ID-to-file resolution are implemented; callers must never be allowed to submit arbitrary local filesystem paths.
+
 **Important limits:** this remains a single-process prototype. It is not a distributed queue and does not yet provide R2 object ownership checks, idempotency keys, cancellation, authenticated callbacks to the Worker, or multi-replica coordination. Do not expose it publicly or treat it as a production multi-tenant service until the Worker token-minting integration, private networking, R2 validation, durable orchestration, lifecycle cleanup and operational monitoring are implemented and tested.
 
 ## Deliberate boundaries
