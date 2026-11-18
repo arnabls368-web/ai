@@ -33,6 +33,8 @@ The renderer is intentionally a single-process, single-replica service. Its queu
 
 Automated checks cover the Worker type-check/build, approval decision helper, upload-source validation, renderer unit tests, Docker build, FFmpeg smoke encode, non-root startup and persistent-volume behavior. Storage tests use a mocked S3-compatible endpoint.
 
+External video URL uploads are disabled by default. To enable them, set the Worker variable `YOUTUBE_UPLOAD_ALLOWED_HOSTS` to a comma-separated list of exact, operator-approved hostnames (for example, `media.example.org,cdn.example.net`). Matching is exact; wildcard and parent-domain matching are not supported. Keep the list narrow and use HTTPS-only origins. NEXUS render-job uploads do not use this external-host allowlist.
+
 The following live-provider workflows have **not** yet been proven end to end:
 
 - Real S3-compatible bucket PUT and GET using the deployed credentials.
