@@ -2,35 +2,60 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { requestHumanApproval } from "./human-approval.mjs";
 
-test("accepts only an explicit accepted true confirmation", async () => {
-  const context = { mcpReq: { elicitInput: async () => ({ action: "accept", content: { confirm: true } }) } };
-  assert.equal(await requestHumanApproval(context, "Approve exact action?"), true);
+test("requests modern round-trip approval when no answer exists", () => {
+  const result = requestHumanApproval(
+    { mcpReq: { inputResponses: undefined } },
+    "upload-approval",
+    "Approve this exact upload?",
+  );
+  assert.equal(result.approved, false);
+  assert.equal(result.declined, false);
+  assert.ok(result.inputRequired);
+  assert.equal(result.inputRequired.resultType, "input_required");
 });
 
-test("decline, cancel and unchecked confirmation are not approval", async () => {
-  for (const response of [
-    { action: "decline" },
-    { action: "cancel" },
-    { action: "accept", content: { confirm: false } },
-    { action: "accept", content: {} },
-    {},
-  ]) {
-    const context = { mcpReq: { elicitInput: async () => response } };
-    assert.equal(await requestHumanApproval(context, "Approve exact action?"), false);
+test("accepts only an explicitly accepted true confirmation", () => {
+  const result = requestHumanApproval(
+    { mcpReq: { inputResponses: {
+      "upload-approval": { kind: "elicit", action: "accept", content: { confirm: true } },
+    } } },
+    "upload-approval",
+    "Approve this exact upload?",
+  );
+  assert.deepEqual(result, { approved: true, declined: false });
+});
+
+test("decline and cancel are terminal denials", () => {
+  for (const action of ["decline", "cancel"]) {
+    const result = requestHumanApproval(
+      { mcpReq: { inputResponses: {
+        "upload-approval": { kind: "elicit", action },
+      } } },
+      "upload-approval",
+      "Approve this exact upload?",
+    );
+    assert.deepEqual(result, { approved: false, declined: true });
+    assert.equal(result.inputRequired, undefined);
   }
 });
 
-test("missing elicitation capability fails closed", async () => {
-  await assert.rejects(
-    requestHumanApproval({}, "Approve exact action?"),
-    /cannot display interactive approval/,
-  );
+test("false, malformed and absent responses request confirmation again", () => {
+  for (const content of [{ confirm: false }, {}, { confirm: "yes" }]) {
+    const result = requestHumanApproval(
+      { mcpReq: { inputResponses: {
+        "upload-approval": { kind: "elicit", action: "accept", content },
+      } } },
+      "upload-approval",
+      "Approve this exact upload?",
+    );
+    assert.equal(result.approved, false);
+    assert.ok(result.inputRequired);
+  }
 });
 
-test("elicitation errors fail closed", async () => {
-  const context = { mcpReq: { elicitInput: async () => { throw new Error("unsupported"); } } };
-  await assert.rejects(
-    requestHumanApproval(context, "Approve exact action?"),
-    /approval was unavailable or unsupported/,
+test("missing MCP request context fails closed", () => {
+  assert.throws(
+    () => requestHumanApproval({}, "upload-approval", "Approve?"),
+    /cannot carry interactive approval/,
   );
 });
