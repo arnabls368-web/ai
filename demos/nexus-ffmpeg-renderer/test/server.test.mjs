@@ -900,3 +900,66 @@ test("signed asset upload rejects an oversized declared body before reading it",
     }
   });
 });
+
+
+test("disk-backed asset uploads enforce a two-upload concurrency limit", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const keys = [
+      "AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME", "AWS_ACCESS_KEY_ID",
+      "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION", "AWS_S3_URL_STYLE",
+    ];
+    const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    const originalFetch = globalThis.fetch;
+    let storageCalls = 0;
+    let releaseUploads;
+    const uploadsMayFinish = new Promise((resolve) => { releaseUploads = resolve; });
+    let resolveTwoStarted;
+    const twoStarted = new Promise((resolve) => { resolveTwoStarted = resolve; });
+    try {
+      process.env.AWS_ENDPOINT_URL = "https://objects.example.test";
+      process.env.AWS_S3_BUCKET_NAME = "nexus-private";
+      process.env.AWS_ACCESS_KEY_ID = "test-access";
+      process.env.AWS_SECRET_ACCESS_KEY = "test-secret";
+      process.env.AWS_DEFAULT_REGION = "auto";
+      process.env.AWS_S3_URL_STYLE = "virtual-host";
+      globalThis.fetch = async (url, init) => {
+        if (String(url).startsWith("http://127.0.0.1:")) return originalFetch(url, init);
+        for await (const _chunk of init.body) { /* consume the streamed file */ }
+        storageCalls += 1;
+        if (storageCalls === 2) resolveTwoStarted();
+        await uploadsMayFinish;
+        return new Response(null, { status: 200 });
+      };
+
+      const server = await startSignedServer(workRoot);
+      try {
+        const sendUpload = (assetId) => originalFetch(server.base + "/assets/" + assetId, {
+          method: "PUT",
+          headers: {
+            ...signedHeader("tenant-a", "project-1", "asset:write"),
+            "content-type": "image/png",
+          },
+          body: Buffer.from("small-test-asset"),
+        });
+        const first = sendUpload("scene-one");
+        const second = sendUpload("scene-two");
+        await twoStarted;
+        const third = await sendUpload("scene-three");
+        assert.equal(third.status, 429);
+        assert.deepEqual(await third.json(), { error: "asset upload capacity is full" });
+        releaseUploads();
+        const results = await Promise.all([first, second]);
+        assert.deepEqual(results.map((response) => response.status), [201, 201]);
+      } finally {
+        releaseUploads();
+        await server.close();
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+});
