@@ -247,3 +247,23 @@ test("production mode refuses legacy shared bearer-token authentication", async 
     /NEXUS_RENDER_SIGNING_SECRET is required when NODE_ENV=production/,
   );
 });
+
+test("signed renderer auth-check confirms service-to-service credentials", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const server = await startSignedServer(workRoot);
+    try {
+      const response = await fetch(`${server.base}/auth-check`, {
+        headers: signedHeader("tenant-a", "project-1", "render:read"),
+      });
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), {
+        ok: true,
+        service: "nexus-render-jobs",
+        authorization: "signed",
+        scope: "render:read",
+      });
+    } finally {
+      await server.close();
+    }
+  });
+});
