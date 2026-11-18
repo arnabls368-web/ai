@@ -8,6 +8,7 @@ import { readJsonLimited, refreshGoogleAccessToken } from "./utils";
 import { registerProductionTools } from "./production-tools";
 import { registerProviderTools } from "./provider-tools";
 import { callPrivateRenderer } from "./render-auth";
+import { hasExactlyOneUploadSource, isVerifiedRenderJob } from "./upload-source";
 
 export type Props = {
   name: string;
@@ -167,11 +168,7 @@ function createServer() {
         description: z.string().max(5000).optional(),
         privacyStatus: z.literal("private").default("private"),
         userApprovalConfirmed: z.literal(true),
-      }).refine((input) => {
-        const hasUrl = Boolean(input.videoUrl);
-        const hasRender = Boolean(input.projectId && input.renderJobId);
-        return hasUrl !== hasRender && (!input.projectId || Boolean(input.renderJobId)) && (!input.renderJobId || Boolean(input.projectId));
-      }, "Provide either videoUrl OR both projectId and renderJobId."),
+      }).refine(hasExactlyOneUploadSource, "Provide either videoUrl OR both projectId and renderJobId."),
     },
     async ({ videoUrl, projectId, renderJobId, title, description, privacyStatus, userApprovalConfirmed }) => {
       const auth = getMcpAuthContext()?.props as Props | undefined;
@@ -186,8 +183,7 @@ function createServer() {
           const owner = Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
           const key = "nexus:projects:v1:" + owner + ":" + projectId;
           const project = await env.OAUTH_KV.get<any>(key, "json");
-          if (!project || project.id !== projectId || project.renderJob?.id !== renderJobId) throw new Error("The render job was not found in a project owned by this Google account.");
-          if (project.renderJob.status !== "succeeded" || project.renderJob.outputUrl !== "/jobs/" + renderJobId + "/output") throw new Error("The NEXUS render job is not confirmed complete or has no verified output endpoint.");
+          if (!isVerifiedRenderJob(project, projectId, renderJobId)) throw new Error("The render job was not found as a completed output in a project owned by this Google account.");
           const bindings = env as unknown as Record<string, unknown>;
           if (typeof bindings.NEXUS_RENDERER_URL !== "string" || typeof bindings.NEXUS_RENDER_SIGNING_SECRET !== "string") throw new Error("The private NEXUS renderer is not configured on this Worker.");
           source = await callPrivateRenderer({
