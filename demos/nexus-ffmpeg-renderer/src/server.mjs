@@ -166,7 +166,7 @@ export function createRenderJobServer({
         outputPath,
         ffmpegPath,
       });
-      const output = await stat(outputPath);
+      const output = await lstat(outputPath);
       if (!output.isFile() || output.size === 0) throw new Error("Render output is not a non-empty regular file.");
       await chmod(outputPath, 0o600);
       job.status = "succeeded";
