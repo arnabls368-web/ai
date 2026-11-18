@@ -47,7 +47,7 @@ app.get("/authorize", async (c) => {
 	// Check if client is already approved
 	if (await isClientApproved(c.req.raw, clientId, c.env.COOKIE_ENCRYPTION_KEY)) {
 		// Skip approval dialog but still create secure state and bind to session
-		const { stateToken } = await createOAuthState(oauthReqInfo, c.env.OAUTH_KV);
+		const { stateToken } = await createOAuthState(oauthReqInfo, c.env.OAUTH_STATE);
 		const { setCookie: sessionBindingCookie } = await bindStateToSession(stateToken);
 		return redirectToGoogle(c.req.raw, c.env, stateToken, {
 			"Set-Cookie": sessionBindingCookie,
@@ -153,7 +153,7 @@ async function redirectToGoogle(
  *
  * SECURITY: This endpoint validates that the state parameter from Google
  * matches both:
- * 1. A valid state token in KV (proves it was created by our server)
+ * 1. A valid state token in its Durable Object (proves it was created by our server)
  * 2. The __Host-CONSENTED_STATE cookie (proves THIS browser consented to it)
  *
  * This prevents CSRF attacks where an attacker's state token is injected
@@ -161,12 +161,12 @@ async function redirectToGoogle(
  */
 app.get("/callback", async (c) => {
 	// Validate OAuth state with session binding
-	// This checks both KV storage AND the session cookie
+	// This checks atomic Durable Object state AND the browser session cookie
 	let oauthReqInfo: AuthRequest;
 	let clearSessionCookie: string;
 
 	try {
-		const result = await validateOAuthState(c.req.raw, c.env.OAUTH_KV);
+		const result = await validateOAuthState(c.req.raw, c.env.OAUTH_STATE);
 		oauthReqInfo = result.oauthReqInfo;
 		clearSessionCookie = result.clearCookie;
 	} catch (error: any) {
