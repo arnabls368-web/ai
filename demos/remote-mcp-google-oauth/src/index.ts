@@ -41,14 +41,31 @@ async function uploadToYouTube(
           "X-Upload-Content-Length": String(videoBytes.byteLength),
         },
         body: JSON.stringify(metadata),
+        redirect: "error",
       },
     );
     if (!start.ok) return { response: start };
     const uploadUrl = start.headers.get("Location");
     if (!uploadUrl) throw new Error("YouTube did not return an upload URL");
 
-    const uploaded = await fetch(uploadUrl, {
+    // The resumable URL is returned by Google's authenticated API. Validate
+    // its origin before forwarding the user's OAuth bearer token to it.
+    let parsedUploadUrl: URL;
+    try {
+      parsedUploadUrl = new URL(uploadUrl);
+    } catch {
+      throw new Error("YouTube returned an invalid resumable upload URL.");
+    }
+    if (parsedUploadUrl.protocol !== "https:" ||
+        parsedUploadUrl.hostname !== "www.googleapis.com" ||
+        parsedUploadUrl.port || parsedUploadUrl.username ||
+        parsedUploadUrl.password || parsedUploadUrl.hash) {
+      throw new Error("YouTube returned an unexpected upload URL; refusing to send authorization credentials.");
+    }
+
+    const uploaded = await fetch(parsedUploadUrl.toString(), {
       method: "PUT",
+      redirect: "error",
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": mimeType,
