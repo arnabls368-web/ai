@@ -9,6 +9,7 @@ import { registerProductionTools } from "./production-tools";
 import { registerProviderTools } from "./provider-tools";
 import { callPrivateRenderer } from "./render-auth";
 import { hasExactlyOneUploadSource, isVerifiedRenderJob } from "./upload-source.mjs";
+import { uploadResumableVideo } from "./youtube-resumable.mjs";
 
 export type Props = {
   name: string;
@@ -109,15 +110,11 @@ async function uploadToYouTube(
       throw new Error("YouTube returned an unexpected upload URL; refusing to send authorization credentials.");
     }
 
-    const uploaded = await fetch(parsedUploadUrl.toString(), {
-      method: "PUT",
-      redirect: "error",
-      signal: AbortSignal.timeout(120_000),
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": mimeType,
-      },
-      body: videoBytes,
+    const uploaded = await uploadResumableVideo({
+      uploadUrl: parsedUploadUrl.toString(),
+      videoBytes,
+      mimeType,
+      accessToken: token,
     });
     return { response: uploaded };
   };
