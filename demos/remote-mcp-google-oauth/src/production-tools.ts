@@ -689,6 +689,8 @@ async function googleApiGet(url: string, auth: GoogleAuthProps): Promise<any> {
     headers: { Authorization: `Bearer ${token}` },
     // Never forward an OAuth bearer token across an API redirect.
     redirect: "error",
+    // Bound stalled upstream requests so MCP calls cannot hang indefinitely.
+    signal: AbortSignal.timeout(20_000),
   });
   let response = await request(auth.accessToken);
   if (response.status === 401 && auth.refreshToken) {
@@ -701,10 +703,14 @@ async function googleApiGet(url: string, auth: GoogleAuthProps): Promise<any> {
     response = await request(renewed);
   }
   if (!response.ok) {
-    const detail = (await response.text()).slice(0, 300);
-    throw new Error(`Google API request failed (${response.status}): ${detail}`);
+    // Do not relay upstream response bodies, which may contain sensitive details.
+    throw new Error(`Google API request failed (${response.status}).`);
   }
-  return response.json();
+  try {
+    return await response.json();
+  } catch {
+    throw new Error("Google API returned an invalid JSON response.");
+  }
 }
 
 function registerChannelTools(server: McpServer) {
