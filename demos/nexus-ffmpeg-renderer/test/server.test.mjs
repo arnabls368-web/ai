@@ -691,3 +691,26 @@ test("renderer auth-check refuses legacy credentials instead of claiming signed 
     }
   });
 });
+
+
+test("signed asset upload route rejects render scopes before touching object storage", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const server = await startSignedServer(workRoot);
+    try {
+      for (const scope of ["render:read", "render:submit"]) {
+        const response = await fetch(`${server.base}/assets/scene-1`, {
+          method: "PUT",
+          headers: {
+            ...signedHeader("tenant-a", "project-1", scope),
+            "content-type": "image/png",
+          },
+          body: Buffer.from("test-image"),
+        });
+        assert.equal(response.status, 401);
+        assert.deepEqual(await response.json(), { error: "unauthorized" });
+      }
+    } finally {
+      await server.close();
+    }
+  });
+});
