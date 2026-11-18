@@ -81,7 +81,9 @@ test("OAuth state rejects absent, malformed, unknown and expired state", async (
   const store = createStateStore();
   await assert.rejects(validateOAuthState(new Request("https://worker.example/callback"), store), /Missing or invalid state parameter/);
   await assert.rejects(validateOAuthState(callbackRequest("not-a-uuid", ""), store), /Missing or invalid state parameter/);
-  await assert.rejects(validateOAuthState(callbackRequest("00000000-0000-4000-8000-000000000000", ""), store), /Missing session binding cookie/);
+  const unknownToken = "00000000-0000-4000-8000-000000000000";
+  const { setCookie: unknownCookie } = await bindStateToSession(unknownToken);
+  await assert.rejects(validateOAuthState(callbackRequest(unknownToken, unknownCookie.split(";")[0]), store), /Invalid or expired state/);
 
   const { stateToken } = await createOAuthState(authRequest, store);
   store.expire(stateToken);
