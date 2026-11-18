@@ -30,6 +30,20 @@ async function withWorkRoot(run) {
   }
 }
 
+function validPayload() {
+  return {
+    manifest: {
+      version: 1,
+      renderer: "ffmpeg",
+      durationSeconds: 1,
+      aspectRatio: "16:9",
+      output: { resolution: "720p", frameRate: "24", format: "mp4" },
+      tracks: { video: [{ scene: 1, startSeconds: 0, durationSeconds: 1, assetId: "scene", fit: "cover" }] },
+    },
+    assetMap: { scene: "scene.jpg" },
+  };
+}
+
 async function waitForFailedJob(base, id) {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const response = await fetch(`${base}/jobs/${id}`, {
@@ -65,7 +79,7 @@ test("job API rejects missing bearer credentials", async () => {
       const response = await fetch(`${server.base}/jobs`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ manifest: {}, assetMap: {} }),
+        body: JSON.stringify(validPayload()),
       });
       assert.equal(response.status, 401);
     } finally {
@@ -74,17 +88,28 @@ test("job API rejects missing bearer credentials", async () => {
   });
 });
 
-test("authenticated job submission returns an opaque job ID", async () => {
+test("authenticated job submission validates manifests before queueing", async () => {
   await withWorkRoot(async (workRoot) => {
     const server = await startServer(workRoot);
     try {
-      const response = await fetch(`${server.base}/jobs`, {
+      const invalid = await fetch(`${server.base}/jobs`, {
         method: "POST",
         headers: {
           authorization: `Bearer ${TOKEN}`,
           "content-type": "application/json",
         },
         body: JSON.stringify({ manifest: {}, assetMap: {} }),
+      });
+      assert.equal(invalid.status, 400);
+      assert.match((await invalid.json()).error, /manifest/i);
+
+      const response = await fetch(`${server.base}/jobs`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${TOKEN}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(validPayload()),
       });
       assert.equal(response.status, 202);
       const result = await response.json();
