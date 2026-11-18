@@ -212,7 +212,7 @@ function createServer() {
         }
         if (!source.ok) { const status = source.status; await source.body?.cancel(); throw new Error("Could not retrieve video (HTTP " + status + ")."); }
         const mimeType = (source.headers.get("Content-Type") || "").split(";")[0].trim().toLowerCase();
-        if (mimeType !== "video/mp4" && !(videoUrl && mimeType.startsWith("video/"))) { await source.body?.cancel(); throw new Error("The video source must return an MP4 file."); }
+        if (mimeType !== "video/mp4" && !(videoUrl && mimeType.startsWith("video/"))) { await source.body?.cancel(); throw new Error("The video source must return a supported video file."); }
         const videoBytes = await readVideoBodyBounded(source);
         // Bind approval to the exact bytes and metadata after retrieval, but
         // before opening a YouTube upload session or transmitting the video.
