@@ -77,7 +77,7 @@ Set `NEXUS_RENDER_SIGNING_SECRET` to a random secret of at least 32 characters. 
 
 The API rejects expired, altered, wrong-scope and wrong-tenant/project credentials. A job record is only visible to the same tenant and project that submitted it. Tenant and project identifiers are not included in public job responses. The Worker must mint separate short-lived submit/read tokens using the same secret; do not send Google OAuth credentials to the renderer.
 
-For local compatibility only, if `NEXUS_RENDER_SIGNING_SECRET` is absent, the service still accepts the legacy `NEXUS_RENDER_TOKEN` shared bearer credential. This fallback is not suitable for a public multi-tenant deployment.
+For local development only, if `NEXUS_RENDER_SIGNING_SECRET` is absent, the service may accept the legacy `NEXUS_RENDER_TOKEN` shared bearer credential. The fallback is automatically disabled when `NODE_ENV=production`; production startup fails unless `NEXUS_RENDER_SIGNING_SECRET` is configured. This is deliberately fail-closed and is not suitable to work around by setting production mode off on a public host.
 
 The API limits request bodies to 1 MiB, persists job metadata and queued work as atomic JSON files under `NEXUS_RENDER_WORKDIR`, retries jobs interrupted while running when the service restarts, keeps at most 100 terminal job records, and runs at most one render by default. Mount `/work` on persistent storage; without that persistent mount, job state and output files are lost when the container is removed. Mount a trusted asset directory read-only. Do not put signing secrets or tokens in source control or logs.
 
