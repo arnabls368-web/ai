@@ -71,6 +71,7 @@ export function createRenderJobServer({
   allowLegacyToken = process.env.NODE_ENV !== "production",
   assetRoot = process.env.NEXUS_ASSET_ROOT ?? "/assets",
   workRoot = process.env.NEXUS_RENDER_WORKDIR ?? "/work",
+  ffmpegPath = process.env.FFMPEG_PATH ?? "ffmpeg",
   maxConcurrent = 1,
 } = {}) {
   if (signingSecret && signingSecret.length < 32) throw new Error("NEXUS_RENDER_SIGNING_SECRET must contain at least 32 characters.");
@@ -162,6 +163,7 @@ export function createRenderJobServer({
         assetMap: job.assetMap,
         assetRoot,
         outputPath,
+        ffmpegPath,
       });
       const output = await stat(outputPath);
       if (!output.isFile() || output.size === 0) throw new Error("Render output is not a non-empty regular file.");
