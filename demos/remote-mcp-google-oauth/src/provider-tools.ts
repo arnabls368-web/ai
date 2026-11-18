@@ -190,11 +190,14 @@ export function registerProviderTools(server: McpServer) {
         const status = await providerJson(statusUrl, {
           headers: { Authorization: `Key ${apiKey}` },
         }, "fal.ai");
+        // fal.ai can report FAILED with an error payload. Handle terminal
+        // failures before the generic non-COMPLETED branch so diagnostics are
+        // not accidentally presented as a job that is still running.
+        if (status.status === "FAILED" || status.error || status.error_type) {
+          return result({ status: "FAILED", requestId, error: status.error, errorType: status.error_type });
+        }
         if (status.status !== "COMPLETED") {
           return result({ status: status.status, requestId, queuePosition: status.queue_position, logs: status.logs ?? [], note: "The same job is still running. Poll this request ID again later." });
-        }
-        if (status.error || status.error_type) {
-          return result({ status: "FAILED", requestId, error: status.error, errorType: status.error_type });
         }
         const output = await providerJson(responseUrl, {
           headers: { Authorization: `Key ${apiKey}` },
