@@ -13,5 +13,7 @@ RUN chmod 0755 /app/docker-entrypoint.sh
 
 ENV NODE_ENV=production
 EXPOSE 8080
+# The entrypoint briefly starts as root to prepare Railway-mounted volume ownership,
+# then docker-entrypoint.sh uses gosu to run the application as the unprivileged node user.
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["node", "src/server.mjs"]
