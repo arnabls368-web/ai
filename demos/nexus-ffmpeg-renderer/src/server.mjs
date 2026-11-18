@@ -296,6 +296,7 @@ export function createRenderJobServer({
           return json(response, 409, { error: "render output is not ready", status: job.status });
         }
         let outputHandle;
+        let outputSize;
         try {
           outputHandle = await open(job.outputPath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
           const openedFile = await outputHandle.stat();
@@ -303,6 +304,7 @@ export function createRenderJobServer({
             await outputHandle.close();
             return json(response, 500, { error: "render output is not a regular file" });
           }
+          outputSize = openedFile.size;
         } catch {
           if (outputHandle) await outputHandle.close().catch(() => {});
           return json(response, 500, { error: "render output could not be verified" });
@@ -314,31 +316,12 @@ export function createRenderJobServer({
         });
         response.writeHead(200, {
           "content-type": "video/mp4",
-          "content-disposition": 'attachment; filename="nexus-render.mp4"',
+          "content-disposition": "attachment; filename=\"nexus-render.mp4\"",
           "cache-control": "no-store",
-          "content-length": String((await outputHandle.stat()).size),
+          "content-length": String(outputSize),
           "x-content-type-options": "nosniff",
         });
         outputStream.pipe(response);
-
-            }
-            response.writeHead(200, {
-              "content-type": "video/mp4",
-              "content-disposition": 'attachment; filename="nexus-render.mp4"',
-              "cache-control": "no-store",
-              "content-length": String(openedFile.size),
-              "x-content-type-options": "nosniff",
-            });
-            outputStream.pipe(response);
-          } catch {
-            outputStream.destroy();
-            if (!response.headersSent) json(response, 500, { error: "render output could not be verified" });
-          }
-        });
-        outputStream.once("error", () => {
-          if (!response.headersSent) json(response, 500, { error: "render output could not be read" });
-          else response.destroy();
-        });
         return;
       }
       if (request.method === "GET" && !match[2]) {
