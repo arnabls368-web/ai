@@ -61,7 +61,7 @@ test("checks session progress after a server error before retrying", async () =>
   });
   assert.equal(response.status, 201);
   assert.equal(calls.length, 3);
-  assert.equal(calls[1].headers.get("Content-Range"), "bytes */6");
+  assert.equal(new Headers(calls[1].headers).get("Content-Range"), "bytes */6");
   assert.equal(calls[2].body.byteLength, 6);
 });
 
