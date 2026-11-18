@@ -102,7 +102,7 @@ app.post("/authorize", async (c) => {
 		);
 
 		// Create OAuth state and bind it to this user's session
-		const { stateToken } = await createOAuthState(state.oauthReqInfo, c.env.OAUTH_KV);
+		const { stateToken } = await createOAuthState(state.oauthReqInfo, c.env.OAUTH_STATE);
 		const { setCookie: sessionBindingCookie } = await bindStateToSession(stateToken);
 
 		// Set both cookies: approved client list + session binding
