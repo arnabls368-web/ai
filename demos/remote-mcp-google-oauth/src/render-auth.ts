@@ -89,7 +89,7 @@ export async function callPrivateRenderer({
   path: string;
   method?: "GET" | "POST" | "PUT";
   body?: unknown;
-  rawBody?: ArrayBuffer;
+  rawBody?: ArrayBuffer | ReadableStream<Uint8Array>;
   contentType?: string;
 }): Promise<Response> {
   const base = new URL(baseUrl);
