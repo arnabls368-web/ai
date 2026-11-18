@@ -38,8 +38,18 @@ function hmac(key, value, encoding) {
 
 function signedRequest({ method, key, body, contentType }) {
   const { bucket, base, region, accessKeyId, secretAccessKey } = config();
-  const objectPath = (base.pathname.replace(/\/$/, "") + "/" + encodePath(bucket) + "/" + encodePath(key)) || "/";
-  const url = new URL(base.origin + objectPath);
+  const urlStyle = process.env.AWS_S3_URL_STYLE ?? "path";
+  let url;
+  if (urlStyle === "virtual-host") {
+    url = new URL(base.toString());
+    url.hostname = bucket + "." + base.hostname;
+    url.pathname = base.pathname.replace(/\/$/, "") + "/" + encodePath(key);
+  } else if (urlStyle === "path") {
+    const objectPath = base.pathname.replace(/\/$/, "") + "/" + encodePath(bucket) + "/" + encodePath(key);
+    url = new URL(base.origin + objectPath);
+  } else {
+    throw new Error("AWS_S3_URL_STYLE must be path or virtual-host.");
+  }
   const host = url.host;
   const payloadHash = body ? createHash("sha256").update(body).digest("hex") : EMPTY_SHA256;
   const amzDate = new Date().toISOString().replace(/[:-]|\.\d{3}/g, "");
