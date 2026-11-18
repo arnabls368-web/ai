@@ -714,3 +714,60 @@ test("signed asset upload route rejects render scopes before touching object sto
     }
   });
 });
+
+
+test("signed asset-write authorization stores uploaded bytes in private object storage", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const keys = [
+      "AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME", "AWS_ACCESS_KEY_ID",
+      "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION", "AWS_S3_URL_STYLE",
+    ];
+    const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    const originalFetch = globalThis.fetch;
+    let storedRequest;
+    try {
+      process.env.AWS_ENDPOINT_URL = "https://objects.example.test";
+      process.env.AWS_S3_BUCKET_NAME = "nexus-private";
+      process.env.AWS_ACCESS_KEY_ID = "test-access";
+      process.env.AWS_SECRET_ACCESS_KEY = "test-secret";
+      process.env.AWS_DEFAULT_REGION = "auto";
+      process.env.AWS_S3_URL_STYLE = "virtual-host";
+      globalThis.fetch = async (url, init) => {
+        if (String(url).startsWith("http://127.0.0.1:")) return originalFetch(url, init);
+        storedRequest = { url: String(url), method: init.method, body: Buffer.from(init.body) };
+        return new Response(null, { status: 200 });
+      };
+
+      const server = await startSignedServer(workRoot);
+      try {
+        const bytes = Buffer.from("private-image-bytes");
+        const response = await originalFetch(`${server.base}/assets/scene-1`, {
+          method: "PUT",
+          headers: {
+            ...signedHeader("tenant-a", "project-1", "asset:write"),
+            "content-type": "image/png",
+          },
+          body: bytes,
+        });
+        assert.equal(response.status, 201);
+        assert.deepEqual(await response.json(), {
+          assetId: "scene-1",
+          filename: "scene-1.png",
+          bytes: bytes.length,
+          storage: "private_object_storage",
+        });
+        assert.equal(storedRequest.method, "PUT");
+        assert.deepEqual(storedRequest.body, bytes);
+        assert.match(storedRequest.url, /^https:\\/\\/nexus-private\\.objects\\.example\\.test\\/assets\\/tenant-a\\/project-1\\//);
+      } finally {
+        await server.close();
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+});
