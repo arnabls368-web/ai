@@ -21,7 +21,7 @@ To deploy your Worker run:
 uv run pywrangler deploy
 ```
 
-## Testing
+## CORS configuration\n\nThe Worker does not allow cross-origin browser requests by default. Set the `CORS_ALLOWED_ORIGINS` Worker variable to a comma-separated list of exact origins (scheme, host, and optional port; no paths or trailing slashes). For example, `https://your-app.example.com`. Do not use `*` for deployed environments.\n\nThe local `wrangler.jsonc` example allows the Vite development origins on ports 5173. Configure the production variable for the exact browser application origins that need access.\n\n## Testing
 
 To test run:
 
