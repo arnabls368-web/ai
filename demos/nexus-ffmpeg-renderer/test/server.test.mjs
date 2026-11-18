@@ -235,3 +235,15 @@ test("signed render API enforces separate submit and read scopes", async () => {
     }
   });
 });
+
+test("production mode refuses legacy shared bearer-token authentication", async () => {
+  assert.throws(
+    () => createRenderJobServer({
+      token: TOKEN,
+      signingSecret: "",
+      allowLegacyToken: false,
+      workRoot: path.join(os.tmpdir(), "nexus-render-production-auth-test"),
+    }),
+    /NEXUS_RENDER_SIGNING_SECRET is required when NODE_ENV=production/,
+  );
+});
