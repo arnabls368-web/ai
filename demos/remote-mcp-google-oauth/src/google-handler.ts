@@ -217,6 +217,7 @@ app.get("/callback", async (c) => {
 	}
 	if (!userResponse.ok) {
 		console.error("Google userinfo request failed:", userResponse.status);
+		await userResponse.body?.cancel();
 		return c.text("Failed to verify Google account information", 502);
 	}
 
