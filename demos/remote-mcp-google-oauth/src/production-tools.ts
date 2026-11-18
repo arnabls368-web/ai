@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { env } from "cloudflare:workers";
 import { getMcpAuthContext } from "agents/mcp/server";
-import { refreshGoogleAccessToken } from "./utils";
+import { readJsonLimited, refreshGoogleAccessToken } from "./utils";
 import { callPrivateRenderer } from "./render-auth";
 
 const formats = ["long_form", "shorts", "tutorial", "documentary", "faceless"] as const;
@@ -707,7 +707,7 @@ async function googleApiGet(url: string, auth: GoogleAuthProps): Promise<any> {
     throw new Error(`Google API request failed (${response.status}).`);
   }
   try {
-    return await response.json();
+    return await readJsonLimited(response, 1_048_576);
   } catch {
     throw new Error("Google API returned an invalid JSON response.");
   }
