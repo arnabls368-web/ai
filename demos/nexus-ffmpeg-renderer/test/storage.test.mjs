@@ -133,3 +133,51 @@ test("round-trips private assets through the signed S3-compatible PUT and GET pa
     }
   }
 });
+
+
+test("fails closed on object-storage authorization and missing-object responses", async () => {
+  const keys = ["AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION", "AWS_S3_URL_STYLE"];
+  const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  const originalFetch = globalThis.fetch;
+  try {
+    process.env.AWS_ENDPOINT_URL = "https://objects.example.test";
+    process.env.AWS_S3_BUCKET_NAME = "nexus-private";
+    process.env.AWS_ACCESS_KEY_ID = "test-access";
+    process.env.AWS_SECRET_ACCESS_KEY = "test-secret";
+    process.env.AWS_DEFAULT_REGION = "auto";
+    process.env.AWS_S3_URL_STYLE = "virtual-host";
+    const { putPrivateAsset, getPrivateAsset } = await import("../src/storage.mjs");
+
+    globalThis.fetch = async () => new Response("sensitive provider detail", { status: 403 });
+    await assert.rejects(
+      putPrivateAsset({
+        tenantId: "tenant-failure", projectId: "project-failure",
+        assetId: "asset-failure", mimeType: "image/png", bytes: Buffer.from("image"),
+      }),
+      (error) => {
+        assert.match(error.message, /HTTP 403/);
+        assert.equal(error.message.includes("sensitive provider detail"), false);
+        return true;
+      },
+    );
+
+    globalThis.fetch = async () => new Response("private object details", { status: 404 });
+    await assert.rejects(
+      getPrivateAsset({
+        tenantId: "tenant-failure", projectId: "project-failure",
+        assetId: "asset-missing", extension: ".png",
+      }),
+      (error) => {
+        assert.match(error.message, /HTTP 404/);
+        assert.equal(error.message.includes("private object details"), false);
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
