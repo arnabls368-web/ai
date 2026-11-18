@@ -92,6 +92,37 @@ test("HTTP server applies bounded request and keep-alive timeouts", async () => 
   });
 });
 
+test("restricts persisted job and rendered output permissions", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const instance = await startServer(workRoot);
+    try {
+      const rootInfo = await (await import("node:fs/promises")).stat(workRoot);
+      assert.equal(rootInfo.mode & 0o777, 0o700);
+      const response = await fetch(`${instance.base}/jobs`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify(validPayload()),
+      });
+      assert.equal(response.status, 202);
+      const { id } = await response.json();
+      const jobDirectory = path.join(workRoot, id);
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        try {
+          const record = await (await import("node:fs/promises")).stat(path.join(jobDirectory, "job.json"));
+          assert.equal(record.mode & 0o777, 0o600);
+          break;
+        } catch {
+          if (attempt === 99) throw new Error("Job record was not persisted.");
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      }
+      const directoryInfo = await (await import("node:fs/promises")).stat(jobDirectory);
+      assert.equal(directoryInfo.mode & 0o777, 0o700);
+    } finally {
+      await instance.close();
+    }
+  });
+});
 test("health endpoint is available without credentials", async () => {
   await withWorkRoot(async (workRoot) => {
     const server = await startServer(workRoot);
