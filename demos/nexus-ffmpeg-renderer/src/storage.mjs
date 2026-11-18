@@ -49,15 +49,13 @@ function signedRequest({ method, key, body, contentType }) {
     "x-amz-content-sha256": payloadHash,
     "x-amz-date": amzDate,
   };
-  if (method === "PUT") headers["x-amz-server-side-encryption"] = "AES256";
   if (contentType) headers["content-type"] = contentType;
   const signedHeaders = Object.keys(headers).sort().join(";");
   const canonicalHeaders = Object.keys(headers).sort().map((name) =>
     name + ":" + String(headers[name]).trim() + "\n"
   ).join("");
-  const canonicalRequest = [
-    method, url.pathname, "", canonicalHeaders, signedHeaders, payloadHash,
-  ].join("\n");
+  const canonicalRequest = method + "\n" + url.pathname + "\n\n" +
+    canonicalHeaders + signedHeaders + "\n" + payloadHash;
   const scope = dateStamp + "/" + region + "/s3/aws4_request";
   const stringToSign = [
     "AWS4-HMAC-SHA256", amzDate, scope,
