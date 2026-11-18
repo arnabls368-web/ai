@@ -13,6 +13,7 @@ A small, provider-neutral FFmpeg rendering engine for NEXUS. It consumes the per
 - H.264 video, AAC audio and fast-start MP4 output.
 - Validates local asset paths and rejects symlinks escaping the asset directory.\n- Allows only explicit image/video/audio file extensions; playlist and manifest-based media inputs are rejected.\n- Restricts FFmpeg input protocols to local files and disables interactive stdin.
 - Uses `spawn` with argument arrays; it does not interpolate user input into a shell command.
+- Enforces a duration-scaled FFmpeg execution timeout, capped at six hours.
 
 ## Run locally
 
