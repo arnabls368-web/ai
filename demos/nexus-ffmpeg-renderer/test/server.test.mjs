@@ -640,6 +640,51 @@ test("restart recovery rejects NUL bytes in persisted asset paths", async () => 
   });
 });
 
+test("restart recovery re-queues jobs interrupted while running", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const id = "00000000-0000-4000-8000-000000000099";
+    const assetRoot = path.join(workRoot, "assets");
+    const directory = path.join(workRoot, id);
+    await mkdir(assetRoot, { recursive: true });
+    await mkdir(directory, { recursive: true });
+    await writeFile(path.join(assetRoot, "scene.jpg"), "image");
+    const fakeFfmpeg = path.join(workRoot, "recovery-fake-ffmpeg");
+    await writeFile(fakeFfmpeg, "#!/usr/bin/env node\\nconst fs = require('node:fs');\\nfs.writeFileSync(process.argv.at(-1), 'recovered mp4 output');\\n");
+    await chmod(fakeFfmpeg, 0o700);
+    await writeFile(path.join(directory, "job.json"), JSON.stringify({
+      id,
+      tenantId: null,
+      projectId: null,
+      status: "running",
+      createdAt: new Date().toISOString(),
+      startedAt: new Date().toISOString(),
+      ...validPayload(),
+    }));
+
+    const restarted = await startServer(workRoot, { ffmpegPath: fakeFfmpeg });
+    try {
+      let job;
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        const response = await fetch(`${restarted.base}/jobs/${id}`, {
+          headers: { authorization: `Bearer ${TOKEN}` },
+        });
+        assert.equal(response.status, 200);
+        job = await response.json();
+        if (job.status === "succeeded" || job.status === "failed") break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.equal(job.status, "succeeded");
+      const output = await fetch(`${restarted.base}/jobs/${id}/output`, {
+        headers: { authorization: `Bearer ${TOKEN}` },
+      });
+      assert.equal(output.status, 200);
+      assert.equal(await output.text(), "recovered mp4 output");
+    } finally {
+      await restarted.close();
+    }
+  });
+});
+
 test("job status survives a render-service restart", async () => {
   await withWorkRoot(async (workRoot) => {
     const first = await startServer(workRoot);
