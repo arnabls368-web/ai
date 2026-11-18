@@ -45,19 +45,25 @@ export async function fetchUpstreamAuthToken({
 }): Promise<[{ accessToken: string; refreshToken?: string } | null, Response | null]> {
   if (!code) return [null, new Response("Missing code", { status: 400 })];
 
-  const resp = await fetch(upstreamUrl, {
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      code,
-      grant_type: grantType,
-      redirect_uri: redirectUri,
-    }).toString(),
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    method: "POST",
-    redirect: "error",
-    signal: AbortSignal.timeout(20_000),
-  });
+  let resp: Response;
+  try {
+    resp = await fetch(upstreamUrl, {
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        code,
+        grant_type: grantType,
+        redirect_uri: redirectUri,
+      }).toString(),
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      method: "POST",
+      redirect: "error",
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch {
+    console.error("Google token exchange request failed or timed out");
+    return [null, new Response("Google token exchange request failed", { status: 502 })];
+  }
   if (!resp.ok) {
     console.error("Google token exchange failed:", resp.status);
     return [null, new Response("Failed to fetch access token", { status: 500 })];
