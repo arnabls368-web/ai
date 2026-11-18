@@ -67,11 +67,9 @@ function validPayload() {
   };
 }
 
-async function waitForFailedJob(base, id) {
+async function waitForFailedJob(base, id, headers = { authorization: `Bearer ${TOKEN}` }) {
   for (let attempt = 0; attempt < 100; attempt += 1) {
-    const response = await fetch(`${base}/jobs/${id}`, {
-      headers: { authorization: `Bearer ${TOKEN}` },
-    });
+    const response = await fetch(`${base}/jobs/${id}`, { headers });
     assert.equal(response.status, 200);
     const job = await response.json();
     if (job.status === "failed") return job;
@@ -195,7 +193,7 @@ test("signed render jobs are isolated by tenant and project", async () => {
       });
       assert.equal(submitted.status, 202);
       const { id } = await submitted.json();
-      await waitForFailedJob(server.base, id);
+      await waitForFailedJob(server.base, id, signedHeader("tenant-a", "project-1", "render:read"));
 
       const wrongTenant = await fetch(`${server.base}/jobs/${id}`, {
         headers: signedHeader("tenant-b", "project-1", "render:read"),
