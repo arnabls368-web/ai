@@ -28,14 +28,18 @@ function failure(error: unknown) {
 
 function trustedFalUrl(value: string): string {
   const url = new URL(value);
-  if (url.protocol !== "https:" || !["queue.fal.run", "queue.falrun.com"].includes(url.hostname) || url.username || url.password) {
+  if (url.protocol !== "https:" || !["queue.fal.run", "queue.falrun.com"].includes(url.hostname) ||
+      url.username || url.password || url.port || url.search || url.hash) {
     throw new Error("fal.ai returned an unexpected queue URL; refusing to fetch it.");
   }
   return url.toString();
 }
 
 async function providerJson(url: string, init: RequestInit, provider: string): Promise<any> {
-  const response = await fetch(url, init);
+  // Provider-returned URLs must not be allowed to redirect requests to an
+  // untrusted host or internal address. All configured provider endpoints are
+  // expected to respond directly.
+  const response = await fetch(url, { ...init, redirect: "error" });
   if (!response.ok) {
     const detail = (await response.text()).slice(0, 500);
     throw new Error(`${provider} API request failed (${response.status}): ${detail}`);
