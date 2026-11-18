@@ -165,7 +165,15 @@ export function createRenderJobServer({
       }
     }
     restored.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    queue.push(...restored);
+    const accepted = restored.slice(0, MAX_QUEUE_SIZE);
+    const overflow = restored.slice(MAX_QUEUE_SIZE);
+    for (const job of overflow) {
+      job.status = "failed";
+      job.error = "Render queue capacity was exceeded during service recovery.";
+      job.completedAt = new Date().toISOString();
+      await persistJob(job);
+    }
+    queue.push(...accepted);
     await pruneJobs();
   }
 
