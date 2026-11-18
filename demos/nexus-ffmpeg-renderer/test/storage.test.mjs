@@ -181,3 +181,74 @@ test("fails closed on object-storage authorization and missing-object responses"
     }
   }
 });
+
+
+test("private object keys isolate tenants and projects and never expose raw asset IDs", async () => {
+  const keys = [
+    "AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME", "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION", "AWS_S3_URL_STYLE",
+  ];
+  const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  const originalFetch = globalThis.fetch;
+  const requested = [];
+  try {
+    process.env.AWS_ENDPOINT_URL = "https://objects.example.test";
+    process.env.AWS_S3_BUCKET_NAME = "nexus-private";
+    process.env.AWS_ACCESS_KEY_ID = "test-access";
+    process.env.AWS_SECRET_ACCESS_KEY = "test-secret";
+    process.env.AWS_DEFAULT_REGION = "auto";
+    process.env.AWS_S3_URL_STYLE = "virtual-host";
+    globalThis.fetch = async (url) => {
+      requested.push(String(url));
+      return new Response(null, { status: 200 });
+    };
+    const { putPrivateAsset } = await import("../src/storage.mjs");
+    const common = { assetId: "private-scene-name", mimeType: "image/png", bytes: Buffer.from("image") };
+    await putPrivateAsset({ ...common, tenantId: "tenant-a", projectId: "project-1" });
+    await putPrivateAsset({ ...common, tenantId: "tenant-b", projectId: "project-1" });
+    await putPrivateAsset({ ...common, tenantId: "tenant-a", projectId: "project-2" });
+    assert.equal(new Set(requested).size, 3);
+    assert.ok(requested.every((url) => url.includes("/assets/")));
+    assert.ok(requested.every((url) => !url.includes("private-scene-name")));
+    assert.ok(requested[0].includes("/assets/tenant-a/project-1/"));
+    assert.ok(requested[1].includes("/assets/tenant-b/project-1/"));
+    assert.ok(requested[2].includes("/assets/tenant-a/project-2/"));
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("private storage rejects non-HTTPS and credential-bearing endpoints", async () => {
+  const keys = ["AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"];
+  const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  const originalFetch = globalThis.fetch;
+  try {
+    process.env.AWS_S3_BUCKET_NAME = "nexus-private";
+    process.env.AWS_ACCESS_KEY_ID = "test-access";
+    process.env.AWS_SECRET_ACCESS_KEY = "test-secret";
+    const { putPrivateAsset } = await import("../src/storage.mjs");
+    for (const endpoint of ["http://objects.example.test", "https://user:pass@objects.example.test"]) {
+      process.env.AWS_ENDPOINT_URL = endpoint;
+      globalThis.fetch = async () => {
+        throw new Error("fetch must not be called for an invalid endpoint");
+      };
+      await assert.rejects(
+        putPrivateAsset({
+          tenantId: "tenant-a", projectId: "project-1",
+          assetId: "scene-1", mimeType: "image/png", bytes: Buffer.from("image"),
+        }),
+        /clean HTTPS URL/,
+      );
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
