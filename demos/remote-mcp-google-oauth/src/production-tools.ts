@@ -617,6 +617,141 @@ function registerRendererTools(server: McpServer) {
       }
     },
   );
+
+  server.registerTool(
+    "nexus_submit_render",
+    {
+      description:
+        "Submit the saved NEXUS render manifest to the authenticated project's private FFmpeg renderer. All referenced assets must already be transferred into private storage. This starts a render job but does not upload or publish the result.",
+      inputSchema: z.object({ projectId: z.string().uuid() }),
+    },
+    async ({ projectId }) => {
+      try {
+        const owner = await getProjectScope();
+        const project = await env.OAUTH_KV.get<NexusProject>(projectKey(owner, projectId), "json");
+        if (!project) throw new Error("Project not found for this account.");
+        if (!project.renderManifest) throw new Error("Create a render manifest before submitting a render.");
+        if (project.renderJob && ["queued", "running"].includes(project.renderJob.status)) {
+          throw new Error("This project already has an active render job. Check its status before submitting another.");
+        }
+        const manifest = project.renderManifest as {
+          tracks?: { video?: Array<{ assetId: string }>; voiceover?: { assetId: string }; music?: { assetId: string } };
+        };
+        const assetIds = new Set<string>();
+        for (const scene of manifest.tracks?.video ?? []) assetIds.add(scene.assetId);
+        if (manifest.tracks?.voiceover?.assetId) assetIds.add(manifest.tracks.voiceover.assetId);
+        if (manifest.tracks?.music?.assetId) assetIds.add(manifest.tracks.music.assetId);
+        const assetMap: Record<string, string> = {};
+        for (const assetId of assetIds) {
+          const stored = project.assets?.[assetId];
+          if (!stored) throw new Error("Asset " + assetId + " has not been transferred to private storage.");
+          assetMap[assetId] = stored.filename;
+        }
+        const baseUrl = env.NEXUS_RENDERER_URL;
+        const secret = env.NEXUS_RENDER_SIGNING_SECRET;
+        if (!baseUrl || !secret) throw new Error("The private renderer URL and signing secret are not configured.");
+        const response = await callPrivateRenderer({
+          baseUrl, secret, tenantId: owner, projectId,
+          scope: "render:submit", path: "/jobs", method: "POST",
+          body: { manifest: project.renderManifest, assetMap },
+        });
+        if (response.status !== 202) {
+          const status = response.status;
+          await response.body?.cancel();
+          throw new Error("Private renderer rejected the render submission (HTTP " + status + ").");
+        }
+        const submitted = await readJsonLimited(response, 65_536) as { id?: string; status?: string };
+        if (typeof submitted.id !== "string" || !/^[0-9a-f-]{36}$/i.test(submitted.id) || submitted.status !== "queued") {
+          throw new Error("Private renderer returned an invalid render-job receipt.");
+        }
+        const latest = await env.OAUTH_KV.get<NexusProject>(projectKey(owner, projectId), "json");
+        if (!latest) throw new Error("Project disappeared after render submission.");
+        latest.renderJob = {
+          id: submitted.id, status: "queued",
+          createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+        };
+        latest.revision += 1;
+        latest.updatedAt = new Date().toISOString();
+        await env.OAUTH_KV.put(projectKey(owner, projectId), JSON.stringify(latest));
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              status: "render_queued",
+              projectId,
+              renderJobId: submitted.id,
+              statusTool: "nexus_get_render_status",
+              note: "Rendering is asynchronous. Check status before retrieving the completed output.",
+            }, null, 2),
+          }],
+        };
+      } catch (error) {
+        return projectError(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "nexus_get_render_status",
+    {
+      description: "Check the saved render job for an owned NEXUS project and persist its latest renderer status.",
+      inputSchema: z.object({ projectId: z.string().uuid() }),
+    },
+    async ({ projectId }) => {
+      try {
+        const owner = await getProjectScope();
+        const key = projectKey(owner, projectId);
+        const project = await env.OAUTH_KV.get<NexusProject>(key, "json");
+        if (!project) throw new Error("Project not found for this account.");
+        if (!project.renderJob?.id) throw new Error("This project has no submitted render job.");
+        const baseUrl = env.NEXUS_RENDERER_URL;
+        const secret = env.NEXUS_RENDER_SIGNING_SECRET;
+        if (!baseUrl || !secret) throw new Error("The private renderer URL and signing secret are not configured.");
+        const response = await callPrivateRenderer({
+          baseUrl, secret, tenantId: owner, projectId,
+          scope: "render:read", path: "/jobs/" + project.renderJob.id, method: "GET",
+        });
+        if (!response.ok) {
+          const status = response.status;
+          await response.body?.cancel();
+          throw new Error("Private renderer status check failed (HTTP " + status + ").");
+        }
+        const status = await readJsonLimited(response, 65_536) as {
+          id?: string; status?: string; outputBytes?: number; outputUrl?: string; error?: string;
+        };
+        if (status.id !== project.renderJob.id ||
+            !["queued", "running", "succeeded", "failed"].includes(status.status ?? "")) {
+          throw new Error("Private renderer returned an invalid job status.");
+        }
+        project.renderJob = {
+          ...project.renderJob,
+          status: status.status!,
+          updatedAt: new Date().toISOString(),
+          ...(status.outputUrl === "/jobs/" + project.renderJob.id + "/output" ? { outputUrl: status.outputUrl } : {}),
+          ...(status.error ? { error: status.error.slice(0, 500) } : {}),
+        };
+        project.revision += 1;
+        project.updatedAt = new Date().toISOString();
+        await env.OAUTH_KV.put(key, JSON.stringify(project));
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              projectId,
+              renderJobId: status.id,
+              status: status.status,
+              ...(status.outputBytes ? { outputBytes: status.outputBytes } : {}),
+              outputReady: status.status === "succeeded",
+              outputRetrieval: status.status === "succeeded" ? "private_renderer_output_endpoint" : "not_ready",
+              ...(status.error ? { error: status.error } : {}),
+            }, null, 2),
+          }],
+        };
+      } catch (error) {
+        return projectError(error);
+      }
+    },
+  );
 }
 
 function registerProjectTools(server: McpServer) {
