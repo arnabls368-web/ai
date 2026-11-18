@@ -152,7 +152,7 @@ test("job status survives a render-service restart", async () => {
       const job = await response.json();
       assert.equal(job.id, jobId);
       assert.equal(job.status, "failed");
-      assert.match(job.error, /manifest/i);
+      assert.match(job.error, /ENOENT|asset/i);
       assert.equal("manifest" in job, false);
       assert.equal("assetMap" in job, false);
     } finally {
