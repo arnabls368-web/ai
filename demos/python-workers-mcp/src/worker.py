@@ -2,7 +2,6 @@ from workers import DurableObject
 
 
 def setup_server(env):
-    from starlette.middleware import Middleware
     from starlette.middleware.cors import CORSMiddleware
     from mcp.server.fastmcp import FastMCP
 
@@ -41,7 +40,13 @@ def setup_server(env):
         CORSMiddleware,
         allow_origins=allowed_origins,
         allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["authorization", "content-type", "last-event-id", "mcp-protocol-version", "mcp-session-id"],
+        allow_headers=[
+            "authorization",
+            "content-type",
+            "last-event-id",
+            "mcp-protocol-version",
+            "mcp-session-id",
+        ],
     )
     return mcp, app
 
