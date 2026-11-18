@@ -4,6 +4,7 @@ import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/p
 import path from "node:path";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { renderManifest, validateManifest } from "./renderer.mjs";
+import { verifyRenderToken } from "./auth.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024;
 const MAX_RETAINED_JOBS = 100;
@@ -19,13 +20,15 @@ function json(response, status, value) {
   response.end(JSON.stringify(value));
 }
 
-function authorized(request, token) {
+function requestClaims(request, { signingSecret, legacyToken, scope }) {
   const header = request.headers.authorization ?? "";
-  const prefix = "Bearer ";
-  if (!header.startsWith(prefix)) return false;
-  const supplied = Buffer.from(header.slice(prefix.length));
-  const expected = Buffer.from(token);
-  return supplied.length === expected.length && timingSafeEqual(supplied, expected);
+  if (!header.startsWith("Bearer ")) return null;
+  const credential = header.slice(7);
+  if (signingSecret) return verifyRenderToken(credential, { secret: signingSecret, scope });
+  const supplied = Buffer.from(credential);
+  const expected = Buffer.from(legacyToken ?? "");
+  if (!expected.length || supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return null;
+  return { tenantId: null, projectId: null, legacy: true };
 }
 
 async function readJson(request) {
@@ -48,6 +51,8 @@ function publicJob(job) {
   delete result.manifest;
   delete result.assetMap;
   delete result.outputPath;
+  delete result.tenantId;
+  delete result.projectId;
   return {
     ...result,
     ...(job.status === "succeeded" ? { outputUrl: `/jobs/${job.id}/output` } : {}),
@@ -62,11 +67,13 @@ function publicJob(job) {
  */
 export function createRenderJobServer({
   token = process.env.NEXUS_RENDER_TOKEN,
+  signingSecret = process.env.NEXUS_RENDER_SIGNING_SECRET,
   assetRoot = process.env.NEXUS_ASSET_ROOT ?? "/assets",
   workRoot = process.env.NEXUS_RENDER_WORKDIR ?? "/work",
   maxConcurrent = 1,
 } = {}) {
-  if (!token || token.length < 32) throw new Error("NEXUS_RENDER_TOKEN must be set to a random secret of at least 32 characters.");
+  if (signingSecret && signingSecret.length < 32) throw new Error("NEXUS_RENDER_SIGNING_SECRET must contain at least 32 characters.");
+  if (!signingSecret && (!token || token.length < 32)) throw new Error("Configure NEXUS_RENDER_SIGNING_SECRET (recommended) or a legacy NEXUS_RENDER_TOKEN of at least 32 characters.");
   if (!Number.isInteger(maxConcurrent) || maxConcurrent < 1 || maxConcurrent > 2) {
     throw new Error("maxConcurrent must be 1 or 2.");
   }
@@ -190,11 +197,15 @@ export function createRenderJobServer({
       if (request.method === "GET" && url.pathname === "/health") {
         return json(response, 200, { status: "ok", service: "nexus-render-jobs", persistence: "filesystem" });
       }
-      if (!authorized(request, token)) {
-        return json(response, 401, { error: "unauthorized" });
-      }
+      const isSubmission = request.method === "POST" && url.pathname === "/jobs";
+      const claims = requestClaims(request, {
+        signingSecret,
+        legacyToken: token,
+        scope: isSubmission ? "render:submit" : "render:read",
+      });
+      if (!claims) return json(response, 401, { error: "unauthorized" });
 
-      if (request.method === "POST" && url.pathname === "/jobs") {
+      if (isSubmission) {
         try {
           if (queue.length + active >= MAX_QUEUE_SIZE) {
             return json(response, 429, { error: "render queue is full" });
@@ -240,6 +251,9 @@ export function createRenderJobServer({
       if (!match) return json(response, 404, { error: "not found" });
       const job = jobs.get(match[1]);
       if (!job) return json(response, 404, { error: "job not found" });
+      if (!claims.legacy && (job.tenantId !== claims.tenantId || job.projectId !== claims.projectId)) {
+        return json(response, 404, { error: "job not found" });
+      }
 
       if (request.method === "GET" && match[2] === "/output") {
         if (job.status !== "succeeded" || !job.outputPath) {
