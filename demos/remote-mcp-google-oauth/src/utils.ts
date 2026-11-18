@@ -140,19 +140,28 @@ export async function refreshGoogleAccessToken(
   clientId: string,
   clientSecret: string,
 ): Promise<string | null> {
-  const response = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      refresh_token: refreshToken,
-      grant_type: "refresh_token",
-    }),
-    redirect: "error",
-    signal: AbortSignal.timeout(20_000),
-  });
-  if (!response.ok) return null;
+  let response: Response;
+  try {
+    response = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refreshToken,
+        grant_type: "refresh_token",
+      }),
+      redirect: "error",
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch {
+    console.error("Google token refresh request failed or timed out");
+    return null;
+  }
+  if (!response.ok) {
+    await response.body?.cancel();
+    return null;
+  }
   let body: unknown;
   try {
     body = await readJsonLimited(response, 65_536);
