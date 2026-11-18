@@ -18,15 +18,21 @@ export class OAuthStateDO {
       } catch {
         return Response.json({ error: "invalid JSON" }, { status: 400 });
       }
-      if (typeof body.value !== "string" || !body.value ||
+      const now = Date.now();
+      if (typeof body.value !== "string" || !body.value || body.value.length > 16_384 ||
           typeof body.expiresAt !== "number" || !Number.isSafeInteger(body.expiresAt) ||
-          body.expiresAt <= Date.now()) {
+          body.expiresAt <= now || body.expiresAt > now + 600_000) {
         return Response.json({ error: "invalid OAuth state record" }, { status: 400 });
       }
-      await this.state.storage.put<StoredOAuthState>("oauth-state", {
-        value: body.value,
-        expiresAt: body.expiresAt,
+      const stored = await this.state.storage.transaction(async (transaction) => {
+        if (await transaction.get<StoredOAuthState>("oauth-state")) return false;
+        await transaction.put<StoredOAuthState>("oauth-state", {
+          value: body.value as string,
+          expiresAt: body.expiresAt as number,
+        });
+        return true;
       });
+      if (!stored) return Response.json({ error: "OAuth state already exists" }, { status: 409 });
       await this.state.storage.setAlarm(body.expiresAt);
       return Response.json({ stored: true }, { status: 201 });
     }
