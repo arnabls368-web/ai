@@ -54,7 +54,7 @@ jobs:
             test "$(id -u)" -ne 0
             test "$(cat /work/existing-job.json)" = "existing-job-data"
             test "$(stat -c %u /work/existing-job.json)" = "1000"
-            printf "-preserved" >> /work/existing-job.json
+            printf "%s" "-preserved" >> /work/existing-job.json
             test -w /assets
             touch /assets/railway-volume-startup-check
           '
