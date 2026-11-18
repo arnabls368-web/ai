@@ -1,6 +1,5 @@
 import { createServer } from "node:http";
 import { chmod, mkdir, open, readdir, readFile, rename, rm, lstat, writeFile } from "node:fs/promises";
-simport
 import path from "node:path";
 import { constants as fsConstants } from "node:fs";
 import { randomUUID, timingSafeEqual } from "node:crypto";
