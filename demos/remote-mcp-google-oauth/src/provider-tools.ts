@@ -161,7 +161,18 @@ export function registerProviderTools(server: McpServer) {
         const key = `nexus:fal-jobs:v1:${scope}:${requestId}`;
         const job = await env.OAUTH_KV.get<{ endpointId: string; requestId: string; statusUrl: string; responseUrl: string; createdAt: string }>(key, "json");
         if (!job) throw new Error("fal.ai job not found for this account, or its 7-day tracking record expired.");
-        const status = await providerJson(job.statusUrl, {
+        // Treat KV records as untrusted at the point of use too: validate their
+        // shape and provider origins before attaching the secret API key.
+        if (job.requestId !== requestId ||
+            typeof job.endpointId !== "string" ||
+            !/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*){1,4}$/i.test(job.endpointId) ||
+            typeof job.statusUrl !== "string" ||
+            typeof job.responseUrl !== "string") {
+          throw new Error("The saved fal.ai job record is invalid; refusing to contact the provider.");
+        }
+        const statusUrl = trustedFalUrl(job.statusUrl);
+        const responseUrl = trustedFalUrl(job.responseUrl);
+        const status = await providerJson(statusUrl, {
           headers: { Authorization: `Key ${apiKey}` },
         }, "fal.ai");
         if (status.status !== "COMPLETED") {
@@ -170,7 +181,7 @@ export function registerProviderTools(server: McpServer) {
         if (status.error || status.error_type) {
           return result({ status: "FAILED", requestId, error: status.error, errorType: status.error_type });
         }
-        const output = await providerJson(job.responseUrl, {
+        const output = await providerJson(responseUrl, {
           headers: { Authorization: `Key ${apiKey}` },
         }, "fal.ai");
         await env.OAUTH_KV.put(key, JSON.stringify({ ...job, completedAt: new Date().toISOString(), completed: true }), { expirationTtl: 60 * 60 * 24 * 7 });
