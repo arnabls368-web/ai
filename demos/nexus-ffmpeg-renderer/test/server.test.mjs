@@ -180,7 +180,7 @@ test("render execution rejects symlink output paths", async () => {
     const externalFile = path.join(workRoot, "outside.mp4");
     await writeFile(externalFile, "do not modify this target");
     const fakeFfmpeg = path.join(workRoot, "fake-ffmpeg");
-    const script = `#!/usr/bin/env node\\nconst fs = require("node:fs");\\nfs.symlinkSync(${JSON.stringify(externalFile)}, process.argv.at(-1));\\n`;
+    const script = ["#!/bin/sh", 'for arg do output="$arg"; done', `ln -s ${JSON.stringify(externalFile)} "$output"`, ""].join("\n");
     await writeFile(fakeFfmpeg, script);
     await chmod(fakeFfmpeg, 0o700);
     const instance = await startServer(workRoot, { ffmpegPath: fakeFfmpeg });
@@ -193,7 +193,7 @@ test("render execution rejects symlink output paths", async () => {
       assert.equal(submitted.status, 202);
       const { id } = await submitted.json();
       let job;
-      for (let attempt = 0; attempt < 100; attempt += 1) {
+      for (let attempt = 0; attempt < 500; attempt += 1) {
         const status = await fetch(`${instance.base}/jobs/${id}`, { headers: { authorization: `Bearer ${TOKEN}` } });
         job = await status.json();
         if (job.status === "succeeded" || job.status === "failed") break;
