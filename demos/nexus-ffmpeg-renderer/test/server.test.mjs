@@ -134,7 +134,7 @@ test("job status survives a render-service restart", async () => {
           authorization: `Bearer ${TOKEN}`,
           "content-type": "application/json",
         },
-        body: JSON.stringify({ manifest: {}, assetMap: {} }),
+        body: JSON.stringify(validPayload()),
       });
       assert.equal(response.status, 202);
       jobId = (await response.json()).id;
