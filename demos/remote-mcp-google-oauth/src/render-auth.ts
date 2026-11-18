@@ -89,7 +89,7 @@ export async function callPrivateRenderer({
   body?: unknown;
 }): Promise<Response> {
   const base = new URL(baseUrl);
-  if (base.protocol !== "https:" || base.username || base.password || base.search || base.hash) {
+  if (base.protocol !== "https:" || base.username || base.password || base.search || base.hash || base.pathname !== "/") {
     throw new Error("NEXUS_RENDERER_URL must be a clean HTTPS base URL.");
   }
   if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\") || path.includes("..")) {
