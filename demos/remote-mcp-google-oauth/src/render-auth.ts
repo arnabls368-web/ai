@@ -78,6 +78,8 @@ export async function callPrivateRenderer({
   path,
   method = "GET",
   body,
+  rawBody,
+  contentType,
 }: {
   baseUrl: string;
   secret: string;
@@ -85,8 +87,10 @@ export async function callPrivateRenderer({
   projectId: string;
   scope: RenderScope;
   path: string;
-  method?: "GET" | "POST";
+  method?: "GET" | "POST" | "PUT";
   body?: unknown;
+  rawBody?: ArrayBuffer;
+  contentType?: string;
 }): Promise<Response> {
   const base = new URL(baseUrl);
   if (base.protocol !== "https:" || base.username || base.password || base.search || base.hash || base.pathname !== "/") {
