@@ -1,6 +1,6 @@
 import type { AuthRequest, OAuthHelpers } from "@cloudflare/workers-oauth-provider";
 import { Hono } from "hono";
-import { fetchUpstreamAuthToken, getUpstreamAuthorizeUrl, type Props } from "./utils";
+import { fetchUpstreamAuthToken, getUpstreamAuthorizeUrl, readJsonLimited, type Props } from "./utils";
 import {
 	addApprovedClient,
 	bindStateToSession,
@@ -222,7 +222,7 @@ app.get("/callback", async (c) => {
 
 	let userInfo: unknown;
 	try {
-		userInfo = await userResponse.json();
+		userInfo = await readJsonLimited(userResponse, 65_536);
 	} catch {
 		return c.text("Google returned invalid account information", 502);
 	}
