@@ -181,6 +181,16 @@ app.get("/callback", async (c) => {
 		return c.text("Invalid OAuth request data", 400);
 	}
 
+	const failWithClearedSession = (response: Response) => {
+		const headers = new Headers(response.headers);
+		headers.set("Set-Cookie", clearSessionCookie);
+		return new Response(response.body, {
+			status: response.status,
+			statusText: response.statusText,
+			headers,
+		});
+	};
+
 	// Google can return an OAuth error instead of a code when the user
 	// cancels consent or the upstream authorization request fails. State has
 	// already been validated and consumed, so clear the browser binding and
@@ -215,7 +225,7 @@ app.get("/callback", async (c) => {
 		upstreamUrl: "https://oauth2.googleapis.com/token",
 	});
 	if (googleErrResponse) {
-		return googleErrResponse;
+		return failWithClearedSession(googleErrResponse);
 	}
 	if (!googleTokens) return c.text("Google did not return an access token", 500);
 	const { accessToken, refreshToken } = googleTokens;
@@ -232,19 +242,19 @@ app.get("/callback", async (c) => {
 		});
 	} catch {
 		console.error("Google userinfo request failed or timed out");
-		return c.text("Failed to verify Google account information", 502);
+		return failWithClearedSession(c.text("Failed to verify Google account information", 502));
 	}
 	if (!userResponse.ok) {
 		console.error("Google userinfo request failed:", userResponse.status);
 		await userResponse.body?.cancel();
-		return c.text("Failed to verify Google account information", 502);
+		return failWithClearedSession(c.text("Failed to verify Google account information", 502));
 	}
 
 	let userInfo: unknown;
 	try {
 		userInfo = await readJsonLimited(userResponse, 65_536);
 	} catch {
-		return c.text("Google returned invalid account information", 502);
+		return failWithClearedSession(c.text("Google returned invalid account information", 502));
 	}
 	if (
 		!userInfo ||
@@ -258,7 +268,7 @@ app.get("/callback", async (c) => {
 		!("verified_email" in userInfo) ||
 		userInfo.verified_email !== true
 	) {
-		return c.text("Google returned incomplete account information", 502);
+		return failWithClearedSession(c.text("Google returned incomplete account information", 502));
 	}
 	const id = userInfo.id;
 	const email = userInfo.email.trim().toLowerCase();
