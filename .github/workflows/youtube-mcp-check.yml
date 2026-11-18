@@ -28,6 +28,8 @@ jobs:
         run: pnpm install --frozen-lockfile --filter remote-mcp-google-oauth...
       - name: Run TypeScript check
         run: pnpm --filter remote-mcp-google-oauth run type-check
+      - name: Exercise approval flow with the real MCP SDK
+        run: node --test demos/remote-mcp-google-oauth/src/human-approval-sdk.test.mjs
       - name: Validate Cloudflare Worker bundle
         run: pnpm --filter remote-mcp-google-oauth exec wrangler deploy --dry-run
 
