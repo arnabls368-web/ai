@@ -6,6 +6,7 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY package.json ./
+RUN npm install --omit=dev --no-package-lock
 COPY src ./src
 COPY test ./test
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
