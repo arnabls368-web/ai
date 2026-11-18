@@ -819,7 +819,16 @@ test("signed asset-write authorization stores uploaded bytes in private object s
       process.env.AWS_S3_URL_STYLE = "virtual-host";
       globalThis.fetch = async (url, init) => {
         if (String(url).startsWith("http://127.0.0.1:")) return originalFetch(url, init);
-        storedRequest = { url: String(url), method: init.method, body: Buffer.from(init.body) };
+        const chunks = [];
+        for await (const chunk of init.body) chunks.push(Buffer.from(chunk));
+        storedRequest = {
+          url: String(url),
+          method: init.method,
+          body: Buffer.concat(chunks),
+          contentLength: new Headers(init.headers).get("content-length"),
+          payloadHash: new Headers(init.headers).get("x-amz-content-sha256"),
+          duplex: init.duplex,
+        };
         return new Response(null, { status: 200 });
       };
 
@@ -843,6 +852,9 @@ test("signed asset-write authorization stores uploaded bytes in private object s
         });
         assert.equal(storedRequest.method, "PUT");
         assert.deepEqual(storedRequest.body, bytes);
+        assert.equal(storedRequest.contentLength, String(bytes.length));
+        assert.equal(storedRequest.payloadHash, createHash("sha256").update(bytes).digest("hex"));
+        assert.equal(storedRequest.duplex, "half");
         assert.ok(storedRequest.url.startsWith("https://nexus-private.objects.example.test/assets/tenant-a/project-1/"));
       } finally {
         await server.close();
