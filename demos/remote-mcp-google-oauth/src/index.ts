@@ -11,7 +11,8 @@ import { callPrivateRenderer } from "./render-auth";
 import { hasExactlyOneUploadSource, isVerifiedRenderJob } from "./upload-source.mjs";
 import { uploadResumableVideo } from "./youtube-resumable.mjs";
 import { requestHumanApproval } from "./human-approval.mjs";
-import { serializeApprovalBinding } from "./approval-binding.mjs";\nexport { OAuthStateDO } from "./oauth-state-do";
+import { serializeApprovalBinding } from "./approval-binding.mjs";
+export { OAuthStateDO } from "./oauth-state-do";
 
 export type Props = {
   name: string;
