@@ -152,17 +152,28 @@ export async function buildFfmpegArgs(manifest, assetMap, assetRoot, outputPath)
   return args;
 }
 
-export async function renderManifest({ manifest, assetMap, assetRoot, outputPath, ffmpegPath = "ffmpeg" }) {
+export async function renderManifest({ manifest, assetMap, assetRoot, outputPath, ffmpegPath = "ffmpeg", timeoutMs = Math.min(6 * 60 * 60 * 1000, Math.max(120_000, manifest.durationSeconds * 10_000)) }) {
   const args = await buildFfmpegArgs(manifest, assetMap, assetRoot, outputPath);
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1) throw new Error("Render timeout must be a positive integer.");
   await new Promise((resolve, reject) => {
     const child = spawn(ffmpegPath, args, { stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, timeoutMs);
     child.stderr.on("data", (chunk) => {
       stderr = (stderr + chunk.toString()).slice(-8000);
     });
-    child.once("error", reject);
+    child.once("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
     child.once("close", (code) => {
-      if (code === 0) resolve();
+      clearTimeout(timeout);
+      if (timedOut) reject(new Error(`FFmpeg exceeded the ${timeoutMs}ms render timeout.`));
+      else if (code === 0) resolve();
       else reject(new Error(`FFmpeg exited with code ${code}: ${stderr.trim()}`));
     });
   });
