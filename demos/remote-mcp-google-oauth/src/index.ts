@@ -207,8 +207,9 @@ function createServer() {
         const sourceLabel = projectId && renderJobId
           ? "NEXUS render project " + projectId + ", job " + renderJobId
           : "External HTTPS source host " + new URL(videoUrl!).hostname;
-        const approved = await requestHumanApproval(
+        const approval = requestHumanApproval(
           ctx,
+          "youtube-private-upload-approval",
           [
             "YOUTUBE PRIVATE UPLOAD APPROVAL",
             "Google channel account: " + auth.email,
@@ -221,7 +222,8 @@ function createServer() {
             "Confirm only if you approve uploading these exact video bytes and metadata to this Google account.",
           ].join("\n"),
         );
-        if (!approved) {
+        if (!approval.approved) {
+          if (approval.inputRequired) return approval.inputRequired;
           return { isError: true, content: [{ type: "text", text: "YouTube upload was not approved. No upload session was started." }] };
         }
         const uploaded = await uploadToYouTube(videoBytes, mimeType, title, description || "", privacyStatus, auth.accessToken, auth.refreshToken);
