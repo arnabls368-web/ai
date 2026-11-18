@@ -2,13 +2,37 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { bindStateToSession, createOAuthState, validateOAuthState } from "./workers-oauth-utils.ts";
 
-function createKv() {
+function createStateStore() {
   const values = new Map();
   return {
     values,
-    async put(key, value) { values.set(key, value); },
-    async get(key) { return values.get(key) ?? null; },
-    async delete(key) { values.delete(key); },
+    expire(id) {
+      const record = values.get(id);
+      if (record) record.expiresAt = 0;
+    },
+    idFromName(name) { return name; },
+    get(id) {
+      return {
+        async fetch(input, init = {}) {
+          const path = new URL(input).pathname;
+          if (path === "/store" && init.method === "POST") {
+            const body = JSON.parse(init.body);
+            values.set(id, { value: body.value, expiresAt: body.expiresAt });
+            return Response.json({ stored: true }, { status: 201 });
+          }
+          if (path === "/consume" && init.method === "POST") {
+            // No await between read and delete: models the DO's atomic consume.
+            const record = values.get(id);
+            values.delete(id);
+            if (!record || record.expiresAt <= Date.now()) {
+              return Response.json({ value: null }, { status: 404 });
+            }
+            return Response.json({ value: record.value });
+          }
+          return new Response("not found", { status: 404 });
+        },
+      };
+    },
   };
 }
 
@@ -19,46 +43,66 @@ const authRequest = {
   state: "client-state",
 };
 
-test("OAuth state is accepted only with its browser-bound cookie and is consumed once", async () => {
-  const kv = createKv();
-  const { stateToken } = await createOAuthState(authRequest, kv);
+function callbackRequest(stateToken, cookie) {
+  return new Request("https://worker.example/callback?state=" + encodeURIComponent(stateToken), {
+    headers: cookie ? { Cookie: cookie } : {},
+  });
+}
+
+test("OAuth state requires its browser binding and is consumed once", async () => {
+  const store = createStateStore();
+  const { stateToken } = await createOAuthState(authRequest, store);
   const { setCookie } = await bindStateToSession(stateToken);
   const cookie = setCookie.split(";")[0];
 
-  const request = new Request("https://worker.example/callback?state=" + encodeURIComponent(stateToken), {
-    headers: { Cookie: cookie },
-  });
-  const result = await validateOAuthState(request, kv);
-
+  const result = await validateOAuthState(callbackRequest(stateToken, cookie), store);
   assert.deepEqual(result.oauthReqInfo, authRequest);
   assert.match(result.clearCookie, /Max-Age=0/);
-  assert.equal(kv.values.has("oauth:state:" + stateToken), false);
-  await assert.rejects(validateOAuthState(request, kv), /Invalid or expired state/);
+  assert.equal(store.values.has(stateToken), false);
+  await assert.rejects(validateOAuthState(callbackRequest(stateToken, cookie), store), /Invalid or expired state/);
 });
 
-test("OAuth state rejects a missing or mismatched browser binding", async () => {
-  const kv = createKv();
-  const { stateToken } = await createOAuthState(authRequest, kv);
+test("OAuth state rejects missing and mismatched browser bindings without consuming state", async () => {
+  const store = createStateStore();
+  const { stateToken } = await createOAuthState(authRequest, store);
   const { setCookie } = await bindStateToSession(stateToken);
   const cookie = setCookie.split(";")[0];
 
-  const missingCookie = new Request("https://worker.example/callback?state=" + encodeURIComponent(stateToken));
-  await assert.rejects(validateOAuthState(missingCookie, kv), /Missing session binding cookie/);
-
-  const mismatchedCookie = new Request("https://worker.example/callback?state=" + encodeURIComponent(stateToken), {
-    headers: { Cookie: cookie.replace(/=[^=]+$/, "=not-the-state-hash") },
-  });
-  await assert.rejects(validateOAuthState(mismatchedCookie, kv), /does not match session/);
+  await assert.rejects(validateOAuthState(callbackRequest(stateToken), store), /Missing session binding cookie/);
+  await assert.rejects(
+    validateOAuthState(callbackRequest(stateToken, cookie.replace(/=[^=]+$/, "=not-the-state-hash")), store),
+    /does not match session/,
+  );
+  assert.equal(store.values.has(stateToken), true);
 });
 
-test("OAuth state rejects absent and expired state parameters", async () => {
-  const kv = createKv();
+test("OAuth state rejects absent, malformed, unknown and expired state", async () => {
+  const store = createStateStore();
+  await assert.rejects(validateOAuthState(new Request("https://worker.example/callback"), store), /Missing or invalid state parameter/);
+  await assert.rejects(validateOAuthState(callbackRequest("not-a-uuid", ""), store), /Missing or invalid state parameter/);
+  await assert.rejects(validateOAuthState(callbackRequest("00000000-0000-4000-8000-000000000000", ""), store), /Missing session binding cookie/);
+
+  const { stateToken } = await createOAuthState(authRequest, store);
+  store.expire(stateToken);
+  const { setCookie } = await bindStateToSession(stateToken);
   await assert.rejects(
-    validateOAuthState(new Request("https://worker.example/callback"), kv),
-    /Missing state parameter/,
-  );
-  await assert.rejects(
-    validateOAuthState(new Request("https://worker.example/callback?state=unknown"), kv),
+    validateOAuthState(callbackRequest(stateToken, setCookie.split(";")[0]), store),
     /Invalid or expired state/,
   );
+});
+
+test("concurrent OAuth callbacks can consume a state only once", async () => {
+  const store = createStateStore();
+  const { stateToken } = await createOAuthState(authRequest, store);
+  const { setCookie } = await bindStateToSession(stateToken);
+  const request = callbackRequest(stateToken, setCookie.split(";")[0]);
+
+  const results = await Promise.allSettled([
+    validateOAuthState(request, store),
+    validateOAuthState(request, store),
+  ]);
+  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+  assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+  const rejected = results.find((result) => result.status === "rejected");
+  assert.match(rejected.reason.message, /Invalid or expired state/);
 });
