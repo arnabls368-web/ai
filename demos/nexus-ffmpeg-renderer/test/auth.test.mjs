@@ -77,3 +77,20 @@ test("signing rejects invalid identity and excessive token lifetime", () => {
   assert.throws(() => signRenderToken({ secret: SECRET, tenantId: "../tenant", projectId: "p", scope: "render:read" }));
   assert.throws(() => signRenderToken({ secret: SECRET, tenantId: "t", projectId: "p", scope: "render:read", ttlSeconds: 301 }));
 });
+
+
+test("signed asset-write tokens are accepted only for the asset-write scope", () => {
+  const now = 1_800_000_000_000;
+  const token = signRenderToken({
+    secret: SECRET,
+    tenantId: "tenant-a",
+    projectId: "project-7",
+    scope: "asset:write",
+    now,
+  });
+  const claims = verifyRenderToken(token, { secret: SECRET, scope: "asset:write", now: now + 1_000 });
+  assert.equal(claims?.scope, "asset:write");
+  assert.equal(claims?.tenantId, "tenant-a");
+  assert.equal(claims?.projectId, "project-7");
+  assert.equal(verifyRenderToken(token, { secret: SECRET, scope: "render:submit", now: now + 1_000 }), null);
+});
