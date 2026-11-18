@@ -73,7 +73,8 @@ Do not commit `.dev.vars` or secrets.
 The Worker is named `phn-youtube-mcp`. Its Wrangler configuration declares:
 
 - `MCP_RESOURCE=https://phn-youtube-mcp.arnab368.workers.dev/mcp`
-- KV binding `OAUTH_KV` for account-scoped project records and OAuth provider data\n- SQLite-backed Durable Object binding `OAUTH_STATE` for browser-bound OAuth state, atomic one-time consumption, and expiry cleanup
+- KV binding `OAUTH_KV` for account-scoped project records and OAuth provider data
+- SQLite-backed Durable Object binding `OAUTH_STATE` for browser-bound OAuth state, atomic one-time consumption, and expiry cleanup
 - Secret bindings including `COOKIE_ENCRYPTION_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `EXA_API_KEY`, `FAL_KEY`, and renderer signing/configuration values.
 
 Keep secret values in Cloudflare's secret store. Never put them in source code, GitHub commits, logs or chat.
