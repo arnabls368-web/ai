@@ -123,6 +123,25 @@ test("job API rejects missing bearer credentials", async () => {
   });
 });
 
+test("job API rejects non-JSON submission content types", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const instance = await startServer(workRoot);
+    try {
+      const response = await fetch(`${instance.base}/jobs`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${TOKEN}`,
+          "content-type": "text/plain",
+        },
+        body: JSON.stringify(validPayload()),
+      });
+      assert.equal(response.status, 415);
+    } finally {
+      await instance.close();
+    }
+  });
+});
+
 test("authenticated job submission validates manifests before queueing", async () => {
   await withWorkRoot(async (workRoot) => {
     const server = await startServer(workRoot);
