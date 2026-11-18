@@ -270,17 +270,20 @@ export function createRenderJobServer({
         if (job.status !== "succeeded" || !job.outputPath) {
           return json(response, 409, { error: "render output is not ready", status: job.status });
         }
-        response.writeHead(200, {
-          "content-type": "video/mp4",
-          "content-disposition": 'attachment; filename="nexus-render.mp4"',
-          "cache-control": "no-store",
-        });
         const outputStream = createReadStream(job.outputPath);
+        outputStream.once("open", () => {
+          response.writeHead(200, {
+            "content-type": "video/mp4",
+            "content-disposition": 'attachment; filename="nexus-render.mp4"',
+            "cache-control": "no-store",
+          });
+          outputStream.pipe(response);
+        });
         outputStream.once("error", () => {
           if (!response.headersSent) json(response, 500, { error: "render output could not be read" });
           else response.destroy();
         });
-        return outputStream.pipe(response);
+        return;
       }
       if (request.method === "GET" && !match[2]) {
         return json(response, 200, publicJob(job));
