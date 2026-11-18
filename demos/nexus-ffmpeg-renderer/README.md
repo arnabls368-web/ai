@@ -67,9 +67,21 @@ docker run --rm -p 8080:8080 \
 - `GET /jobs/:id` — authenticated job status.
 - `GET /jobs/:id/output` — authenticated MP4 download after success.
 
-Send `Authorization: Bearer <NEXUS_RENDER_TOKEN>` for job routes. The API limits request bodies to 1 MiB, persists job metadata and queued work as atomic JSON files under `NEXUS_RENDER_WORKDIR`, retries jobs interrupted while running when the service restarts, keeps at most 100 terminal job records, and runs at most one render by default. Mount `/work` on persistent storage; without that persistent mount, job state and output files are lost when the container is removed. Mount a trusted asset directory read-only. Do not put the token in source control or logs.
+### Tenant-bound signed authorization (preferred)
 
-**Important limits:** this is still a single-process, single-bearer-token prototype. It is not a distributed queue, does not provide per-user/tenant authorization, R2 integration, idempotency keys, cancellation, authenticated callbacks to the Worker, or multi-replica coordination. Do not expose it publicly or treat it as a production multi-tenant service. Production still needs tenant-bound credentials, trusted R2 object ownership checks, durable orchestration, lifecycle cleanup, observability and secure Worker-to-renderer connectivity.
+Set `NEXUS_RENDER_SIGNING_SECRET` to a random secret of at least 32 characters. When this variable is configured, signed credentials are required and the legacy shared bearer token is not accepted. The signed token format is HMAC-SHA256 over a base64url JSON claim set. Claims bind the credential to:
+- `aud: "nexus-renderer"`
+- `tenantId` and `projectId`
+- `scope: "render:submit"` or `"render:read"`
+- `iat` and `exp`, with a maximum lifetime of five minutes.
+
+The API rejects expired, altered, wrong-scope and wrong-tenant/project credentials. A job record is only visible to the same tenant and project that submitted it. Tenant and project identifiers are not included in public job responses. The Worker must mint separate short-lived submit/read tokens using the same secret; do not send Google OAuth credentials to the renderer.
+
+For local compatibility only, if `NEXUS_RENDER_SIGNING_SECRET` is absent, the service still accepts the legacy `NEXUS_RENDER_TOKEN` shared bearer credential. This fallback is not suitable for a public multi-tenant deployment.
+
+The API limits request bodies to 1 MiB, persists job metadata and queued work as atomic JSON files under `NEXUS_RENDER_WORKDIR`, retries jobs interrupted while running when the service restarts, keeps at most 100 terminal job records, and runs at most one render by default. Mount `/work` on persistent storage; without that persistent mount, job state and output files are lost when the container is removed. Mount a trusted asset directory read-only. Do not put signing secrets or tokens in source control or logs.
+
+**Important limits:** this remains a single-process prototype. It is not a distributed queue and does not yet provide R2 object ownership checks, idempotency keys, cancellation, authenticated callbacks to the Worker, or multi-replica coordination. Do not expose it publicly or treat it as a production multi-tenant service until the Worker token-minting integration, private networking, R2 validation, durable orchestration, lifecycle cleanup and operational monitoring are implemented and tested.
 
 ## Deliberate boundaries
 
