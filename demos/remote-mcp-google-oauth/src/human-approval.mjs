@@ -17,7 +17,7 @@ const approvalWireSchema = {
  */
 export function requestHumanApproval(context, key, message) {
   const request = context?.mcpReq;
-  if (!request || typeof request.inputResponse !== "function" && !("inputResponses" in request)) {
+  if (!request) {
     throw new Error("This MCP request cannot carry interactive approval. The operation was not performed.");
   }
 
