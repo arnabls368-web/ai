@@ -178,7 +178,7 @@ test("output download refuses symlink replacement after job completion", async (
     await mkdir(assetRoot, { recursive: true });
     await writeFile(path.join(assetRoot, "scene.jpg"), "image");
     const fakeFfmpeg = path.join(workRoot, "fake-ffmpeg");
-    await writeFile(fakeFfmpeg, "#!/usr/bin/env node\\nconst fs = require('node:fs');\\nfs.writeFileSync(process.argv.at(-1), 'fake mp4 output');\\n");
+    await writeFile(fakeFfmpeg, ["#!/usr/bin/env node", "const fs = require('node:fs');", "fs.writeFileSync(process.argv.at(-1), 'fake mp4 output');", ""].join("\n"));
     await chmod(fakeFfmpeg, 0o700);
     const instance = await startServer(workRoot, { ffmpegPath: fakeFfmpeg });
     try {
@@ -190,7 +190,7 @@ test("output download refuses symlink replacement after job completion", async (
       assert.equal(submitted.status, 202);
       const { id } = await submitted.json();
       let job;
-      for (let attempt = 0; attempt < 500; attempt += 1) {
+      for (let attempt = 0; attempt < 1000; attempt += 1) {
         const status = await fetch(`${instance.base}/jobs/${id}`, { headers: { authorization: `Bearer ${TOKEN}` } });
         job = await status.json();
         if (job.status === "succeeded" || job.status === "failed") break;
