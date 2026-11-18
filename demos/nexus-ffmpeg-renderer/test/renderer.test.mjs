@@ -100,6 +100,29 @@ test("rejects asset symlinks that escape the asset directory", async () => {
   }
 });
 
+test("rejects successful FFmpeg exit when output is empty", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "nexus-render-empty-"));
+  try {
+    const fakeFfmpeg = path.join(root, "fake-ffmpeg");
+    await writeFile(fakeFfmpeg, "#!/usr/bin/env node\nconst fs = require('node:fs');\nfs.writeFileSync(process.argv.at(-1), '');\n");
+    await chmod(fakeFfmpeg, 0o700);
+    await writeFile(path.join(root, "one.jpg"), "image");
+    await writeFile(path.join(root, "two.mp4"), "video");
+    await assert.rejects(
+      renderManifest({
+        manifest: sampleManifest(),
+        assetMap: { a: "one.jpg", b: "two.mp4" },
+        assetRoot: root,
+        outputPath: path.join(root, "empty.mp4"),
+        ffmpegPath: fakeFfmpeg,
+        timeoutMs: 1000,
+      }),
+      /non-empty regular output file/
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 test("kills FFmpeg when a render exceeds its timeout", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "nexus-render-timeout-"));
   try {
