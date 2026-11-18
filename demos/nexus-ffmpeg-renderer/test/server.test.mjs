@@ -172,6 +172,36 @@ test("restart recovery rejects symlinked completed render outputs", async () => 
     }
   });
 });
+test("render execution rejects symlink output paths", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const assetRoot = path.join(workRoot, "assets");
+    await mkdir(assetRoot, { recursive: true });
+    await writeFile(path.join(assetRoot, "scene.jpg"), "image");
+    const externalFile = path.join(workRoot, "outside.mp4");
+    await writeFile(externalFile, "do not modify this target");
+    const fakeFfmpeg = path.join(workRoot, "fake-ffmpeg");
+    const script = `#!/usr/bin/env node\\nconst fs = require("node:fs");\\nfs.symlinkSync(${JSON.stringify(externalFile)}, process.argv.at(-1));\\n`;
+    await writeFile(fakeFfmpeg, script);
+    await chmod(fakeFfmpeg, 0o700);
+    const instance = await startServer(workRoot, { ffmpegPath: fakeFfmpeg });
+    try {
+      const submitted = await fetch(`${instance.base}/jobs`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify(validPayload()),
+      });
+      assert.equal(submitted.status, 202);
+      const { id } = await submitted.json();
+      const job = await waitForFailedJob(instance.base, id);
+      assert.equal(job.status, "failed");
+      assert.match(job.error, /regular file/i);
+      assert.equal(await (await import("node:fs/promises")).readFile(externalFile, "utf8"), "do not modify this target");
+      assert.equal((await stat(externalFile)).mode & 0o777, 0o644);
+    } finally {
+      await instance.close();
+    }
+  });
+});
 test("health endpoint is available without credentials", async () => {
   await withWorkRoot(async (workRoot) => {
     const server = await startServer(workRoot);
