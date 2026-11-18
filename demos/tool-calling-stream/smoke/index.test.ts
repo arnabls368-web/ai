@@ -15,10 +15,16 @@ class LocalDevServer {
 		this.port = await getPort();
 		this.serverUrl = `http://localhost:${this.port}`;
 
-		this.serverProcess = spawn("npm", ["run", "dev", "--", `--port=${this.port}`], {
-			shell: true,
-			stdio: "ignore",
-		});
+		const packageManagerCli = process.env.npm_execpath;
+		if (!packageManagerCli) {
+			throw new Error("Run smoke tests through pnpm so npm_execpath is available.");
+		}
+
+		this.serverProcess = spawn(
+			process.execPath,
+			[packageManagerCli, "run", "dev", "--", `--port=${this.port}`],
+			{ stdio: "ignore" },
+		);
 
 		await waitOn({ resources: [this.serverUrl] });
 
