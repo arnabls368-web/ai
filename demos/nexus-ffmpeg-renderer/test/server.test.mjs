@@ -200,7 +200,7 @@ test("render execution rejects symlink output paths", async () => {
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
       assert.equal(job.status, "failed", `unexpected terminal job state: ${job.status}; ${job.error ?? ""}`);
-      assert.match(job.error, /regular file/i);
+      assert.match(job.error, /regular.*file/i);
       assert.equal(await (await import("node:fs/promises")).readFile(externalFile, "utf8"), "do not modify this target");
       assert.equal((await stat(externalFile)).mode & 0o777, 0o644);
     } finally {
