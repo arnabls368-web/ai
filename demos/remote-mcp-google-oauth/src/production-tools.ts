@@ -3,6 +3,7 @@ import { z } from "zod";
 import { env } from "cloudflare:workers";
 import { getMcpAuthContext } from "agents/mcp/server";
 import { refreshGoogleAccessToken } from "./utils";
+import { callPrivateRenderer } from "./render-auth";
 
 const formats = ["long_form", "shorts", "tutorial", "documentary", "faceless"] as const;
 
@@ -14,6 +15,7 @@ const formats = ["long_form", "shorts", "tutorial", "documentary", "faceless"] a
 export function registerProductionTools(server: McpServer) {
   registerProjectTools(server);
   registerChannelTools(server);
+  registerRendererTools(server);
 
   server.registerTool(
     "nexus_plan_video",
@@ -437,6 +439,69 @@ function projectError(error: unknown) {
       text: error instanceof Error ? error.message : "Project operation failed.",
     }],
   };
+}
+
+function registerRendererTools(server: McpServer) {
+  server.registerTool(
+    "nexus_check_renderer_connection",
+    {
+      description:
+        "Verify the configured private NEXUS renderer using a short-lived signed credential bound to the authenticated Google account and an owned project. This checks connectivity only; it does not submit a render or transfer assets.",
+      inputSchema: z.object({ projectId: z.string().uuid() }),
+    },
+    async ({ projectId }) => {
+      try {
+        const owner = await getProjectScope();
+        const project = await env.OAUTH_KV.get<NexusProject>(projectKey(owner, projectId), "json");
+        if (!project) throw new Error("Project not found for this account.");
+        const baseUrl = env.NEXUS_RENDERER_URL;
+        const secret = env.NEXUS_RENDER_SIGNING_SECRET;
+        if (!baseUrl || !secret) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: JSON.stringify({
+                status: "not_configured",
+                rendererUrlConfigured: Boolean(baseUrl),
+                signingSecretConfigured: Boolean(secret),
+                nextRequirement: "Configure the private renderer URL and matching signing secret as Worker secrets after the private renderer host is provisioned.",
+                renderSubmissionEnabled: false,
+              }, null, 2),
+            }],
+          };
+        }
+        const response = await callPrivateRenderer({
+          baseUrl,
+          secret,
+          tenantId: owner,
+          projectId,
+          scope: "render:read",
+          path: "/auth-check",
+          method: "GET",
+        });
+        if (!response.ok) throw new Error(`Private renderer authorization check failed (HTTP ${response.status}).`);
+        const result = await response.json() as { ok?: boolean; service?: string; authorization?: string; scope?: string };
+        if (result.ok !== true || result.authorization !== "signed" || result.scope !== "render:read") {
+          throw new Error("Private renderer returned an unexpected authorization-check response.");
+        }
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              status: "connected",
+              service: result.service,
+              signedAuthorization: true,
+              tenantAndProjectBound: true,
+              renderSubmissionEnabled: false,
+              nextRequirement: "Private R2 asset transfer and trusted asset-ID resolution must be implemented before render submission is enabled.",
+            }, null, 2),
+          }],
+        };
+      } catch (error) {
+        return projectError(error);
+      }
+    },
+  );
 }
 
 function registerProjectTools(server: McpServer) {
