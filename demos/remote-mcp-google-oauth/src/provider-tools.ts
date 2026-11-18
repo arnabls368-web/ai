@@ -152,7 +152,7 @@ export function registerProviderTools(server: McpServer) {
         }
         const approvalDigest = await crypto.subtle.digest(
           "SHA-256",
-          new TextEncoder().encode(account + "\\n" + endpointId + "\\n" + inputJson),
+          new TextEncoder().encode(JSON.stringify([account, endpointId, inputJson])),
         );
         const approvalKey = "fal-generation-" + Array.from(new Uint8Array(approvalDigest), (value) => value.toString(16).padStart(2, "0")).join("");
         const approval = requestHumanApproval(
