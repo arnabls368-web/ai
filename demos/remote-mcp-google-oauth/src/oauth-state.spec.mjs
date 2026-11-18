@@ -122,6 +122,7 @@ test("Durable Object storage transaction enforces one-time consumption under con
     transaction(callback) {
       const result = transactionTail.then(() => callback({
         get: async (key) => values.get(key),
+        put: async (key, value) => values.set(key, value),
         delete: async (key) => values.delete(key),
       }));
       transactionTail = result.catch(() => {});
@@ -137,6 +138,11 @@ test("Durable Object storage transaction enforces one-time consumption under con
   }));
   assert.equal(stored.status, 201);
   assert.equal(alarmAt, expiresAt);
+  const duplicate = await durableObject.fetch(new Request("https://do.example/store", {
+    method: "POST",
+    body: JSON.stringify({ value: JSON.stringify(authRequest), expiresAt }),
+  }));
+  assert.equal(duplicate.status, 409);
 
   const consume = () => durableObject.fetch(new Request("https://do.example/consume", { method: "POST" }));
   const responses = await Promise.all([consume(), consume()]);
@@ -167,6 +173,16 @@ test("Durable Object rejects malformed state records and expires abandoned state
     body: JSON.stringify({ value: "", expiresAt: Date.now() + 60_000 }),
   }));
   assert.equal(malformed.status, 400);
+  const oversized = await durableObject.fetch(new Request("https://do.example/store", {
+    method: "POST",
+    body: JSON.stringify({ value: "x".repeat(16_385), expiresAt: Date.now() + 60_000 }),
+  }));
+  assert.equal(oversized.status, 400);
+  const excessiveTtl = await durableObject.fetch(new Request("https://do.example/store", {
+    method: "POST",
+    body: JSON.stringify({ value: "state", expiresAt: Date.now() + 601_000 }),
+  }));
+  assert.equal(excessiveTtl.status, 400);
 
   const expiredAt = Date.now() + 1_000;
   await durableObject.fetch(new Request("https://do.example/store", {
