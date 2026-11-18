@@ -195,6 +195,7 @@ test("signed render jobs are isolated by tenant and project", async () => {
       });
       assert.equal(submitted.status, 202);
       const { id } = await submitted.json();
+      await waitForFailedJob(server.base, id);
 
       const wrongTenant = await fetch(`${server.base}/jobs/${id}`, {
         headers: signedHeader("tenant-b", "project-1", "render:read"),
