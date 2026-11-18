@@ -106,6 +106,7 @@ test("restricts persisted job storage permissions", async () => {
       });
       assert.equal(response.status, 202);
       const { id } = await response.json();
+      await waitForFailedJob(instance.base, id);
       const jobDirectory = path.join(workRoot, id);
       for (let attempt = 0; attempt < 100; attempt += 1) {
         try {
