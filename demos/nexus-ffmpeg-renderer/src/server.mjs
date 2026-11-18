@@ -3,7 +3,7 @@ import { createReadStream } from "node:fs";
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID, timingSafeEqual } from "node:crypto";
-import { renderManifest } from "./renderer.mjs";
+import { renderManifest, validateManifest } from "./renderer.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024;
 const MAX_RETAINED_JOBS = 100;
@@ -200,8 +200,22 @@ export function createRenderJobServer({
             return json(response, 429, { error: "render queue is full" });
           }
           const body = await readJson(request);
-          if (!body || typeof body !== "object" || !body.manifest || !body.assetMap || typeof body.assetMap !== "object") {
+          if (!body || typeof body !== "object" || Array.isArray(body) ||
+              !body.manifest || typeof body.manifest !== "object" ||
+              !body.assetMap || typeof body.assetMap !== "object" || Array.isArray(body.assetMap)) {
             return json(response, 400, { error: "manifest and assetMap are required" });
+          }
+          const assetEntries = Object.entries(body.assetMap);
+          if (assetEntries.length > 502 || assetEntries.some(([id, file]) =>
+            typeof id !== "string" || !id || id.length > 128 ||
+            typeof file !== "string" || !file || file.length > 512 || file.includes("\\0")
+          )) {
+            return json(response, 400, { error: "assetMap contains invalid or excessive entries" });
+          }
+          try {
+            validateManifest(body.manifest, body.assetMap);
+          } catch (error) {
+            return json(response, 400, { error: String(error?.message ?? error).slice(0, 500) });
           }
           const id = randomUUID();
           const job = {
