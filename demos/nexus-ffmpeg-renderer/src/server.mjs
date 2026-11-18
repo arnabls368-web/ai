@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { createReadStream } from "node:fs";
-import { chmod, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, rename, rm, lstat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { renderManifest, validateManifest } from "./renderer.mjs";
@@ -129,7 +129,8 @@ export function createRenderJobServer({
           delete job.error;
         } else if (job.status === "succeeded") {
           try {
-            const output = await stat(path.join(workRoot, job.id, "render.mp4"));
+            const output = await lstat(path.join(workRoot, job.id, "render.mp4"));
+            if (!output.isFile() || output.size === 0) throw new Error("Restored render output is not a non-empty regular file.");
             job.outputPath = path.join(workRoot, job.id, "render.mp4");
             job.outputBytes = output.size;
           } catch {
