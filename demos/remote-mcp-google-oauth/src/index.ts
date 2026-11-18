@@ -228,7 +228,9 @@ function createServer() {
             title,
             description || "",
             privacyStatus,
-          ].join("\\n")),
+          ].length ? JSON.stringify([
+            auth.email.trim().toLowerCase(), videoSha256, title, description || "", privacyStatus,
+          ]) : ""),
         );
         const approvalKey = "youtube-upload-" + Array.from(new Uint8Array(approvalDigest), (value) => value.toString(16).padStart(2, "0")).join("");
         const approval = requestHumanApproval(
