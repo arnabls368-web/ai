@@ -553,30 +553,17 @@ function registerRendererTools(server: McpServer) {
           throw new Error("Generated asset has an unsupported media type.");
         }
         if (!source.body) throw new Error("Generated asset response has no readable body.");
-        const reader = source.body.getReader();
-        const chunks: Uint8Array[] = [];
         let total = 0;
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            total += value.byteLength;
+        const boundedBody = source.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+          transform(chunk, controller) {
+            total += chunk.byteLength;
             if (total > 100 * 1024 * 1024) {
-              await reader.cancel("Asset exceeds the 100 MiB limit.");
-              throw new Error("Generated asset exceeds the 100 MiB transfer limit.");
+              controller.error(new Error("Generated asset exceeds the 100 MiB transfer limit."));
+              return;
             }
-            chunks.push(value);
-          }
-        } finally {
-          reader.releaseLock();
-        }
-        if (!total) throw new Error("Generated asset is empty.");
-        const bytes = new Uint8Array(total);
-        let offset = 0;
-        for (const chunk of chunks) {
-          bytes.set(chunk, offset);
-          offset += chunk.byteLength;
-        }
+            controller.enqueue(chunk);
+          },
+        }));
         const baseUrl = env.NEXUS_RENDERER_URL;
         const secret = env.NEXUS_RENDER_SIGNING_SECRET;
         if (!baseUrl || !secret) throw new Error("The private renderer URL and signing secret are not configured.");
@@ -588,7 +575,7 @@ function registerRendererTools(server: McpServer) {
           scope: "asset:write",
           path: "/assets/" + encodeURIComponent(assetId),
           method: "PUT",
-          rawBody: bytes.buffer,
+          rawBody: boundedBody,
           contentType: mimeType,
         });
         if (!stored.ok) {
