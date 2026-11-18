@@ -208,7 +208,7 @@ export function createRenderJobServer({
           const assetEntries = Object.entries(body.assetMap);
           if (assetEntries.length > 502 || assetEntries.some(([id, file]) =>
             typeof id !== "string" || !id || id.length > 128 ||
-            typeof file !== "string" || !file || file.length > 512 || file.includes("\\0")
+            typeof file !== "string" || !file || file.length > 512 || file.includes("\0")
           )) {
             return json(response, 400, { error: "assetMap contains invalid or excessive entries" });
           }
