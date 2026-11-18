@@ -62,9 +62,30 @@ export async function fetchUpstreamAuthToken({
     return [null, new Response("Failed to fetch access token", { status: 500 })];
   }
 
-  const body = (await resp.json()) as { access_token?: string; refresh_token?: string };
-  if (!body.access_token) return [null, new Response("Missing access token", { status: 400 })];
-  return [{ accessToken: body.access_token, refreshToken: body.refresh_token }, null];
+  let body: unknown;
+  try {
+    body = await resp.json();
+  } catch {
+    console.error("Google token exchange returned invalid JSON");
+    return [null, new Response("Google returned an invalid token response", { status: 502 })];
+  }
+  if (
+    !body ||
+    typeof body !== "object" ||
+    !("access_token" in body) ||
+    typeof body.access_token !== "string" ||
+    body.access_token.length === 0 ||
+    body.access_token.length > 16_384
+  ) {
+    console.error("Google token exchange response did not contain a valid access token");
+    return [null, new Response("Google returned an invalid access token", { status: 502 })];
+  }
+  const refresh = "refresh_token" in body ? body.refresh_token : undefined;
+  if (refresh !== undefined && (typeof refresh !== "string" || refresh.length === 0 || refresh.length > 16_384)) {
+    console.error("Google token exchange response contained an invalid refresh token");
+    return [null, new Response("Google returned an invalid refresh token", { status: 502 })];
+  }
+  return [{ accessToken: body.access_token, ...(typeof refresh === "string" ? { refreshToken: refresh } : {}) }, null];
 }
 
 export async function refreshGoogleAccessToken(
@@ -84,8 +105,25 @@ export async function refreshGoogleAccessToken(
     redirect: "error",
   });
   if (!response.ok) return null;
-  const body = (await response.json()) as { access_token?: string };
-  return body.access_token ?? null;
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    console.error("Google token refresh returned invalid JSON");
+    return null;
+  }
+  if (
+    !body ||
+    typeof body !== "object" ||
+    !("access_token" in body) ||
+    typeof body.access_token !== "string" ||
+    body.access_token.length === 0 ||
+    body.access_token.length > 16_384
+  ) {
+    console.error("Google token refresh response did not contain a valid access token");
+    return null;
+  }
+  return body.access_token;
 }
 
 export type Props = {
