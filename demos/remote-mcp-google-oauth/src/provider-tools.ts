@@ -4,6 +4,7 @@ import { env } from "cloudflare:workers";
 import { getMcpAuthContext } from "agents/mcp/server";
 import { readJsonLimited } from "./utils";
 import { isFalGenerationFailed } from "./fal-status.mjs";
+import { requestHumanApproval } from "./human-approval.mjs";
 
 type RuntimeEnv = Record<string, unknown>;
 
@@ -122,16 +123,31 @@ export function registerProviderTools(server: McpServer) {
       inputSchema: z.object({
         endpointId: z.string().min(3).max(200).regex(/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*){1,4}$/i),
         input: z.record(z.string(), z.unknown()),
-        userApprovedGeneration: z.literal(true),
       }),
     },
-    async ({ endpointId, input }) => {
+    async ({ endpointId, input }, ctx) => {
       try {
+        // Require a verified account and display the exact endpoint + input before
+        // creating a billable provider job. Never trust a model-supplied boolean.
+        const scope = await accountScope();
+        const auth = getMcpAuthContext()?.props as { email?: string } | undefined;
+        const account = auth?.email?.trim().toLowerCase();
+        if (!account) throw new Error("A signed-in Google account with an email address is required.");
+        const inputJson = JSON.stringify(input);
+        if (typeof inputJson !== "string" || inputJson.length > 12_000) {
+          throw new Error("Generation input exceeds the 12,000-character approval display limit; reduce it before requesting generation.");
+        }
+        const approved = await requestHumanApproval(
+          ctx,
+          "PAID fal.ai generation approval\n" +
+          "Google account: " + account + "\n" +
+          "Endpoint: " + endpointId + "\n" +
+          "Exact input JSON:\n" + inputJson + "\n" +
+          "This request may incur charges from fal.ai. The exact price depends on the selected endpoint and its billing terms. Confirm only if you approve this exact request.",
+        );
+        if (!approved) return failure("Generation was not approved. No fal.ai job was submitted.");
         const apiKey = secret("FAL_KEY");
         if (!apiKey) throw new Error("fal.ai is not configured on this Worker. Add FAL_KEY as a Cloudflare Worker secret.");
-        // Resolve the authenticated account before starting a billable external job.
-        // This prevents an untracked paid job if the request has no valid account scope.
-        const scope = await accountScope();
         const url = `https://queue.fal.run/${endpointId}`;
         const submitted = await providerJson(url, {
           method: "POST",
