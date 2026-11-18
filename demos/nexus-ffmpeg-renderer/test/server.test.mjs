@@ -441,6 +441,48 @@ test("live submissions cannot exceed the bounded queue capacity", async () => {
   });
 });
 
+test("concurrent live submissions reserve queue capacity atomically", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const assetRoot = path.join(workRoot, "assets");
+    await mkdir(assetRoot, { recursive: true });
+    await writeFile(path.join(assetRoot, "scene.jpg"), "image");
+    const fakeFfmpeg = path.join(workRoot, "slow-fake-ffmpeg");
+    await writeFile(fakeFfmpeg, [
+      "#!/usr/bin/env node",
+      "const fs = require('node:fs');",
+      "setTimeout(() => fs.writeFileSync(process.argv.at(-1), 'fake mp4 output'), 250);",
+      "",
+    ].join("\n"));
+    await chmod(fakeFfmpeg, 0o700);
+    const instance = await startServer(workRoot, { ffmpegPath: fakeFfmpeg });
+    try {
+      const submit = () => fetch(`${instance.base}/jobs`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify(validPayload()),
+      });
+      const responses = await Promise.all(Array.from({ length: 10 }, () => submit()));
+      assert.equal(responses.filter((response) => response.status === 202).length, 3);
+      assert.equal(responses.filter((response) => response.status === 429).length, 7);
+      const accepted = await Promise.all(responses.filter((response) => response.status === 202).map((response) => response.json()));
+      for (const { id } of accepted) {
+        let job;
+        for (let attempt = 0; attempt < 500; attempt += 1) {
+          const status = await fetch(`${instance.base}/jobs/${id}`, {
+            headers: { authorization: `Bearer ${TOKEN}` },
+          });
+          job = await status.json();
+          if (job.status === "succeeded" || job.status === "failed") break;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        assert.equal(job.status, "succeeded");
+      }
+    } finally {
+      await instance.close();
+    }
+  });
+});
+
 test("restart recovery ignores malformed persisted job manifests", async () => {
   await withWorkRoot(async (workRoot) => {
     const id = "12345678-1234-4234-8234-123456789abc";
