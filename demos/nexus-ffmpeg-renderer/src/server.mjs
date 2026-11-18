@@ -305,6 +305,7 @@ export function createRenderJobServer({
         const mimeType = String(request.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
         if (!extensionForMime(mimeType)) return json(response, 415, { error: "unsupported asset media type" });
         if (activeAssetUploads >= MAX_CONCURRENT_ASSET_UPLOADS) {
+          response.shouldKeepAlive = false;
           return json(response, 429, { error: "asset upload capacity is full" });
         }
         activeAssetUploads += 1;
@@ -335,6 +336,7 @@ export function createRenderJobServer({
         const contentType = String(request.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
           if (contentType !== "application/json") return json(response, 415, { error: "content-type must be application/json" });
           if (queue.length + active + pendingSubmissions >= MAX_QUEUE_SIZE) {
+            response.shouldKeepAlive = false;
             return json(response, 429, { error: "render queue is full" });
           }
           // Reserve capacity before the first await so concurrent requests cannot
