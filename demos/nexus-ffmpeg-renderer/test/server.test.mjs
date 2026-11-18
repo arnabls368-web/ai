@@ -97,7 +97,7 @@ test("restricts persisted job storage permissions", async () => {
   await withWorkRoot(async (workRoot) => {
     const instance = await startServer(workRoot);
     try {
-      const rootInfo = await (await import("node:fs/promises")).stat(workRoot);
+      const rootInfo = await stat(workRoot);
       assert.equal(rootInfo.mode & 0o777, 0o700);
       const response = await fetch(`${instance.base}/jobs`, {
         method: "POST",
@@ -109,7 +109,7 @@ test("restricts persisted job storage permissions", async () => {
       const jobDirectory = path.join(workRoot, id);
       for (let attempt = 0; attempt < 100; attempt += 1) {
         try {
-          const record = await (await import("node:fs/promises")).stat(path.join(jobDirectory, "job.json"));
+          const record = await stat(path.join(jobDirectory, "job.json"));
           assert.equal(record.mode & 0o777, 0o600);
           break;
         } catch {
@@ -117,7 +117,7 @@ test("restricts persisted job storage permissions", async () => {
           await new Promise((resolve) => setTimeout(resolve, 10));
         }
       }
-      const directoryInfo = await (await import("node:fs/promises")).stat(jobDirectory);
+      const directoryInfo = await stat(jobDirectory);
       assert.equal(directoryInfo.mode & 0o777, 0o700);
     } finally {
       await instance.close();
