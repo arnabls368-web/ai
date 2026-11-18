@@ -207,6 +207,10 @@ export function createRenderJobServer({
       });
       if (!claims) return json(response, 401, { error: "unauthorized" });
 
+      if (request.method === "GET" && url.pathname === "/auth-check") {
+        return json(response, 200, { ok: true, service: "nexus-render-jobs", authorization: "signed", scope: claims.scope });
+      }
+
       if (isSubmission) {
         try {
           if (queue.length + active >= MAX_QUEUE_SIZE) {
