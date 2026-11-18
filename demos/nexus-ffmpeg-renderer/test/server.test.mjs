@@ -192,8 +192,14 @@ test("render execution rejects symlink output paths", async () => {
       });
       assert.equal(submitted.status, 202);
       const { id } = await submitted.json();
-      const job = await waitForFailedJob(instance.base, id);
-      assert.equal(job.status, "failed");
+      let job;
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const status = await fetch(`${instance.base}/jobs/${id}`, { headers: { authorization: `Bearer ${TOKEN}` } });
+        job = await status.json();
+        if (job.status === "succeeded" || job.status === "failed") break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.equal(job.status, "failed", `unexpected terminal job state: ${job.status}; ${job.error ?? ""}`);
       assert.match(job.error, /regular file/i);
       assert.equal(await (await import("node:fs/promises")).readFile(externalFile, "utf8"), "do not modify this target");
       assert.equal((await stat(externalFile)).mode & 0o777, 0o644);
