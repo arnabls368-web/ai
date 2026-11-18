@@ -758,7 +758,7 @@ test("signed asset-write authorization stores uploaded bytes in private object s
         });
         assert.equal(storedRequest.method, "PUT");
         assert.deepEqual(storedRequest.body, bytes);
-        assert.match(storedRequest.url, /^https:\\/\\/nexus-private\\.objects\\.example\\.test\\/assets\\/tenant-a\\/project-1\\//);
+        assert.ok(storedRequest.url.startsWith("https://nexus-private.objects.example.test/assets/tenant-a/project-1/"));
       } finally {
         await server.close();
       }
