@@ -4,6 +4,7 @@ import { env } from "cloudflare:workers";
 import { getMcpAuthContext } from "agents/mcp/server";
 import { readJsonLimited, refreshGoogleAccessToken } from "./utils";
 import { callPrivateRenderer } from "./render-auth";
+import { getStoryboardSceneLimits, MAX_RENDER_SCENES } from "./scene-limits.mjs";
 
 const formats = ["long_form", "shorts", "tutorial", "documentary", "faceless"] as const;
 
@@ -108,9 +109,8 @@ export function registerProductionTools(server: McpServer) {
       const sentences = script
         .replace(/\s+/g, " ")
         .match(/[^.!?]+[.!?]+|[^.!?]+$/g) ?? [script];
-      const sceneCount = Math.max(1, Math.ceil(targetDurationSeconds / maxSceneSeconds));
-      if (sceneCount > 500) {
-        const minimumSceneSeconds = Math.ceil(targetDurationSeconds / 500);
+      const { sceneCount, minimumSceneSeconds } = getStoryboardSceneLimits(targetDurationSeconds, maxSceneSeconds);
+      if (sceneCount > MAX_RENDER_SCENES) {
         return {
           isError: true,
           content: [{
@@ -245,7 +245,7 @@ export function registerProductionTools(server: McpServer) {
         }
         if (!project.storyboard) throw new Error("Create and save a storyboard before preparing a render manifest.");
         const storyboardScenes = project.storyboard.scenes;
-        if (storyboardScenes.length < 1 || storyboardScenes.length > 500) {
+        if (storyboardScenes.length < 1 || storyboardScenes.length > MAX_RENDER_SCENES) {
           throw new Error("The saved storyboard has an unsupported scene count. Create a storyboard with 1–500 scenes before preparing a render manifest.");
         }
         const assetByScene = new Map<number, { assetId: string; fit: "cover" | "contain" }>();
