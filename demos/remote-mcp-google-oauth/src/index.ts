@@ -4,7 +4,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { createMcpHandler, getMcpAuthContext } from "agents/mcp/server";
 import { z } from "zod";
 import { GoogleHandler } from "./google-handler";
-import { refreshGoogleAccessToken } from "./utils";
+import { readJsonLimited, refreshGoogleAccessToken } from "./utils";
 import { registerProductionTools } from "./production-tools";
 import { registerProviderTools } from "./provider-tools";
 
@@ -85,6 +85,7 @@ async function uploadToYouTube(
         },
         body: JSON.stringify(metadata),
         redirect: "error",
+        signal: AbortSignal.timeout(30_000),
       },
     );
     if (!start.ok) return { response: start };
@@ -109,6 +110,7 @@ async function uploadToYouTube(
     const uploaded = await fetch(parsedUploadUrl.toString(), {
       method: "PUT",
       redirect: "error",
+      signal: AbortSignal.timeout(120_000),
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": mimeType,
@@ -120,6 +122,7 @@ async function uploadToYouTube(
 
   let result = await startUpload(initialAccessToken);
   if (result.response.status === 401 && refreshToken) {
+    await result.response.body?.cancel();
     const renewed = await refreshGoogleAccessToken(
       refreshToken,
       env.GOOGLE_CLIENT_ID,
@@ -129,11 +132,19 @@ async function uploadToYouTube(
     result = await startUpload(renewed);
   }
   if (!result.response.ok) {
-    const detail = await result.response.text();
-    throw new Error(`YouTube upload failed (${result.response.status}): ${detail.slice(0, 500)}`);
+    const status = result.response.status;
+    await result.response.body?.cancel();
+    throw new Error(`YouTube upload failed (${status}). Check the connected account's YouTube permissions and try again.`);
   }
-  const uploadedVideo = (await result.response.json()) as { id?: string };
-  if (!uploadedVideo.id) throw new Error("YouTube upload completed but no video ID was returned");
+  let uploadedVideo: unknown;
+  try {
+    uploadedVideo = await readJsonLimited(result.response, 65_536);
+  } catch {
+    throw new Error("YouTube returned an invalid upload confirmation.");
+  }
+  if (!uploadedVideo || typeof uploadedVideo !== "object" || !("id" in uploadedVideo) || typeof uploadedVideo.id !== "string" || !uploadedVideo.id) {
+    throw new Error("YouTube upload completed but no valid video ID was returned");
+  }
   return { videoId: uploadedVideo.id, privacyStatus };
 }
 
@@ -176,10 +187,20 @@ function createServer() {
       }
 
       try {
-        const source = await fetch(parsedUrl.toString(), { redirect: "error" });
-        if (!source.ok) throw new Error(`Could not download video (HTTP ${source.status})`);
+        const source = await fetch(parsedUrl.toString(), {
+          redirect: "error",
+          signal: AbortSignal.timeout(120_000),
+        });
+        if (!source.ok) {
+          const status = source.status;
+          await source.body?.cancel();
+          throw new Error(`Could not download video (HTTP ${status}).`);
+        }
         const mimeType = (source.headers.get("Content-Type") || "").split(";")[0].trim();
-        if (!mimeType.startsWith("video/")) throw new Error("The URL must return a video file.");
+        if (!mimeType.startsWith("video/")) {
+          await source.body?.cancel();
+          throw new Error("The URL must return a video file.");
+        }
         const videoBytes = await readVideoBodyBounded(source);
 
         const uploaded = await uploadToYouTube(
