@@ -13,7 +13,7 @@ export function validateExternalVideoUrl(input, allowedHosts) {
     hostname.endsWith(".test") || hostname.endsWith(".invalid") ||
     hostname.endsWith(".example") || hostname === "metadata.google.internal";
   if (parsed.protocol !== "https:" || parsed.username || parsed.password ||
-      parsed.port || parsed.hash || isIpLiteral || isReservedHost) {
+      parsed.port || parsed.hash || hostname.endsWith(".") || isIpLiteral || isReservedHost) {
     throw new Error("Use a public HTTPS video URL on a public DNS hostname and standard HTTPS port.");
   }
 
