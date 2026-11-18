@@ -207,9 +207,20 @@ function createServer() {
         const sourceLabel = projectId && renderJobId
           ? "NEXUS render project " + projectId + ", job " + renderJobId
           : "External HTTPS source host " + new URL(videoUrl!).hostname;
+        const approvalDigest = await crypto.subtle.digest(
+          "SHA-256",
+          new TextEncoder().encode([
+            auth.email.trim().toLowerCase(),
+            videoSha256,
+            title,
+            description || "",
+            privacyStatus,
+          ].join("\\n")),
+        );
+        const approvalKey = "youtube-upload-" + Array.from(new Uint8Array(approvalDigest), (value) => value.toString(16).padStart(2, "0")).join("");
         const approval = requestHumanApproval(
           ctx,
-          "youtube-private-upload-approval",
+          approvalKey,
           [
             "YOUTUBE PRIVATE UPLOAD APPROVAL",
             "Google channel account: " + auth.email,
