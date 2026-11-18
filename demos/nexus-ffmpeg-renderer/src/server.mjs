@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { createReadStream } from "node:fs";
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { renderManifest, validateManifest } from "./renderer.mjs";
@@ -91,7 +91,8 @@ export function createRenderJobServer({
 
   async function persistJob(job) {
     const directory = jobDirectory(job.id);
-    await mkdir(directory, { recursive: true });
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    await chmod(directory, 0o700);
     const destination = path.join(directory, "job.json");
     const temporary = path.join(directory, `job.${randomUUID()}.tmp`);
     await writeFile(temporary, JSON.stringify(job), { mode: 0o600 });
@@ -111,7 +112,8 @@ export function createRenderJobServer({
   }
 
   async function restoreJobs() {
-    await mkdir(workRoot, { recursive: true });
+    await mkdir(workRoot, { recursive: true, mode: 0o700 });
+    await chmod(workRoot, 0o700);
     const entries = await readdir(workRoot, { withFileTypes: true });
     const restored = [];
     for (const entry of entries) {
@@ -162,6 +164,8 @@ export function createRenderJobServer({
         outputPath,
       });
       const output = await stat(outputPath);
+      if (!output.isFile() || output.size === 0) throw new Error("Render output is not a non-empty regular file.");
+      await chmod(outputPath, 0o600);
       job.status = "succeeded";
       job.outputPath = outputPath;
       job.outputBytes = output.size;
