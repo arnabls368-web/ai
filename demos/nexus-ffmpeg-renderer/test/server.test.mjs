@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { request as httpRequest } from "node:http";
 import { createRenderJobServer } from "../src/server.mjs";
 import { signRenderToken } from "../src/auth.mjs";
 
@@ -852,6 +853,38 @@ test("signed asset-write authorization stores uploaded bytes in private object s
         if (value === undefined) delete process.env[key];
         else process.env[key] = value;
       }
+    }
+  });
+});
+
+
+test("signed asset upload rejects an oversized declared body before reading it", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const server = await startSignedServer(workRoot);
+    try {
+      const result = await new Promise((resolve, reject) => {
+        const request = httpRequest(server.base + "/assets/scene-too-large", {
+          method: "PUT",
+          headers: {
+            ...signedHeader("tenant-a", "project-1", "asset:write"),
+            "content-type": "image/png",
+            "content-length": String(100 * 1024 * 1024 + 1),
+          },
+        }, (response) => {
+          const chunks = [];
+          response.on("data", (chunk) => chunks.push(chunk));
+          response.on("end", () => resolve({
+            status: response.statusCode,
+            body: Buffer.concat(chunks).toString("utf8"),
+          }));
+        });
+        request.on("error", reject);
+        request.end();
+      });
+      assert.equal(result.status, 413);
+      assert.deepEqual(JSON.parse(result.body), { error: "Asset exceeds the 100 MiB limit." });
+    } finally {
+      await server.close();
     }
   });
 });
