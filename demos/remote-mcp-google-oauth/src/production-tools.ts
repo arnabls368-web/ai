@@ -415,6 +415,8 @@ type NexusProject = {
   };
   publishPackage?: { title: string; description: string; tags: string[] };
   renderManifest?: Record<string, unknown>;
+  assets?: Record<string, { filename: string; mimeType: string; bytes: number; storedAt: string }>;
+  renderJob?: { id: string; status: string; createdAt: string; updatedAt: string; outputUrl?: string; error?: string };
 };
 
 async function getProjectScope(): Promise<string> {
@@ -587,6 +589,15 @@ function registerRendererTools(server: McpServer) {
             result.storage !== "private_object_storage" || result.bytes !== total) {
           throw new Error("Private asset storage returned an unexpected confirmation.");
         }
+        const latestProject = await env.OAUTH_KV.get<NexusProject>(projectKey(owner, projectId), "json");
+        if (!latestProject) throw new Error("Project disappeared while storing the asset.");
+        latestProject.assets = {
+          ...(latestProject.assets ?? {}),
+          [assetId]: { filename: result.filename, mimeType, bytes: result.bytes, storedAt: new Date().toISOString() },
+        };
+        latestProject.revision += 1;
+        latestProject.updatedAt = new Date().toISOString();
+        await env.OAUTH_KV.put(projectKey(owner, projectId), JSON.stringify(latestProject));
         return {
           content: [{
             type: "text" as const,
