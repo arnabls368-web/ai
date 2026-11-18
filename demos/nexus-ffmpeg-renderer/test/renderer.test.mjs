@@ -25,7 +25,14 @@ test("accepts a contiguous storyboard with exact asset mappings", () => {
   assert.doesNotThrow(() => validateManifest(sampleManifest(), { a: "one.jpg", b: "two.mp4" }));
 });
 
-test("rejects playlist and unsupported media extensions", () => {\n  assert.throws(() => validateManifest(sampleManifest(), { a: "one.m3u8", b: "two.mp4" }), /unsupported media file type/i);\n  const manifest = sampleManifest();\n  manifest.tracks.music = { assetId: "music" };\n  assert.throws(() => validateManifest(manifest, { a: "one.jpg", b: "two.mp4", music: "music.m3u8" }), /unsupported audio file type/i);\n});\n\ntest("rejects scene gaps and overlaps", () => {
+test("rejects playlist and unsupported media extensions", () => {
+  assert.throws(() => validateManifest(sampleManifest(), { a: "one.m3u8", b: "two.mp4" }), /unsupported media file type/i);
+  const manifest = sampleManifest();
+  manifest.tracks.music = { assetId: "music" };
+  assert.throws(() => validateManifest(manifest, { a: "one.jpg", b: "two.mp4", music: "music.m3u8" }), /unsupported audio file type/i);
+});
+
+test("rejects scene gaps and overlaps", () => {
   const manifest = sampleManifest();
   manifest.tracks.video[1].startSeconds = 4.5;
   assert.throws(() => validateManifest(manifest, { a: "one.jpg", b: "two.mp4" }), /contiguous/);
@@ -51,7 +58,10 @@ test("builds FFmpeg arguments for image, video, voice and ducked music", async (
     const args = await buildFfmpegArgs(manifest, {
       a: "one.jpg", b: "two.mp4", voice: "voice.wav", music: "music.mp3"
     }, root, "/tmp/out.mp4");
-    assert.ok(args.includes("libx264"));\n    assert.ok(args.includes("-nostdin"));\n    assert.equal(args.filter((value) => value === "-protocol_whitelist").length, 4);\n    assert.ok(args.includes("file"));
+    assert.ok(args.includes("libx264"));
+    assert.ok(args.includes("-nostdin"));
+    assert.equal(args.filter((value) => value === "-protocol_whitelist").length, 4);
+    assert.ok(args.includes("file"));
     assert.ok(args.join(" ").includes("sidechaincompress=threshold=0.03:ratio=8:attack=20:release=250"));
     assert.ok(args.includes("/tmp/out.mp4"));
   } finally {
