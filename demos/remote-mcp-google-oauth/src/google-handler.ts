@@ -117,8 +117,8 @@ app.post("/authorize", async (c) => {
 		if (error instanceof OAuthError) {
 			return error.toResponse();
 		}
-		// Unexpected non-OAuth error
-		return c.text(`Internal server error: ${error.message}`, 500);
+		// Keep internal exception details in server logs, not in the public response.
+		return c.text("Internal server error", 500);
 	}
 });
 
@@ -227,7 +227,9 @@ app.get("/callback", async (c) => {
 		userInfo.id.length === 0 ||
 		!("email" in userInfo) ||
 		typeof userInfo.email !== "string" ||
-		!userInfo.email.includes("@")
+		!userInfo.email.includes("@") ||
+		!("verified_email" in userInfo) ||
+		userInfo.verified_email !== true
 	) {
 		return c.text("Google returned incomplete account information", 502);
 	}
