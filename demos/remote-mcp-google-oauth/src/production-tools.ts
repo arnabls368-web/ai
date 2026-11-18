@@ -661,13 +661,14 @@ function registerRendererTools(server: McpServer) {
           throw new Error("Private renderer rejected the render submission (HTTP " + status + ").");
         }
         const submitted = await readJsonLimited(response, 65_536) as { id?: string; status?: string };
-        if (typeof submitted.id !== "string" || !/^[0-9a-f-]{36}$/i.test(submitted.id) || submitted.status !== "queued") {
+        if (typeof submitted.id !== "string" || !/^[0-9a-f-]{36}$/i.test(submitted.id) ||
+            !["queued", "running"].includes(submitted.status ?? "")) {
           throw new Error("Private renderer returned an invalid render-job receipt.");
         }
         const latest = await env.OAUTH_KV.get<NexusProject>(projectKey(owner, projectId), "json");
         if (!latest) throw new Error("Project disappeared after render submission.");
         latest.renderJob = {
-          id: submitted.id, status: "queued",
+          id: submitted.id, status: submitted.status as "queued" | "running",
           createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
         };
         latest.revision += 1;
