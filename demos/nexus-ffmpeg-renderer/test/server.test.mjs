@@ -267,3 +267,18 @@ test("signed renderer auth-check confirms service-to-service credentials", async
     }
   });
 });
+
+test("renderer auth-check refuses legacy credentials instead of claiming signed auth", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const server = await startServer(workRoot);
+    try {
+      const response = await fetch(`${server.base}/auth-check`, {
+        headers: { authorization: `Bearer ${TOKEN}` },
+      });
+      assert.equal(response.status, 401);
+      assert.deepEqual(await response.json(), { error: "signed authorization required" });
+    } finally {
+      await server.close();
+    }
+  });
+});
