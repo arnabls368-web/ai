@@ -2,6 +2,14 @@
 
 Status: partially implemented and deployed; production end-to-end verification is still outstanding. This document distinguishes implemented code and deployed infrastructure from capabilities that have not yet been proven against live providers.
 
+## Current rollout checkpoint (2026-11-18)
+
+- The feature-branch renderer Dockerfile now declares `USER node`. Its entrypoint expects Railway's documented `RAILWAY_RUN_UID=0` override so the entrypoint starts with root privileges, prepares only the mounted `/work` and `/assets` directory roots, and then drops the Node application to the unprivileged `node` account with `gosu`.
+- The currently configured Railway renderer service does **not** have `RAILWAY_RUN_UID` set. Do not deploy this Dockerfile revision to the existing service until that variable is explicitly configured and the rollout is approved; otherwise the entrypoint will start as `node` and cannot chown the root-owned mounted volume.
+- Railway's official volume guidance documents `RAILWAY_RUN_UID=0` as the runtime override for images that need access to root-owned volume mounts. This does not change volume ownership; the application still drops to `node` after initialization.
+- The latest completed Semgrep scan on commit `f2f716354fcd461ddbd7d6068b86cf69e7a992cc` reported four findings: two npm-specific minimum-release-age warnings (the workspace uses pnpm's `minimumReleaseAge: 10080`) and two Docker non-root findings. The scan completed successfully; findings remain visible and are not suppressed.
+- The YouTube MCP Cloudflare deployment workflow is now manual-only (`workflow_dispatch`); pushing to the feature branch cannot automatically deploy the Worker.
+
 ## Current architecture
 
 - The Cloudflare Worker authenticates NEXUS MCP requests through Google OAuth and scopes project records in KV using a normalized Google-account owner hash.
