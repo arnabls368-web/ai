@@ -18,6 +18,7 @@ async function startServer(workRoot) {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   return {
+    server,
     base: `http://127.0.0.1:${address.port}`,
     close: () => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
   };
@@ -77,6 +78,19 @@ async function waitForFailedJob(base, id, headers = { authorization: `Bearer ${T
   }
   throw new Error("Render job did not reach a terminal state in time.");
 }
+
+test("HTTP server applies bounded request and keep-alive timeouts", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const instance = await startServer(workRoot);
+    try {
+      assert.equal(instance.server.requestTimeout, 30_000);
+      assert.equal(instance.server.headersTimeout, 15_000);
+      assert.equal(instance.server.keepAliveTimeout, 5_000);
+    } finally {
+      await instance.close();
+    }
+  });
+});
 
 test("health endpoint is available without credentials", async () => {
   await withWorkRoot(async (workRoot) => {
