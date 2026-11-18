@@ -15,22 +15,21 @@ on:
 jobs:
   type-check:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: demos/remote-mcp-google-oauth
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
+          cache: pnpm
+      - name: Install locked workspace dependencies
+        run: pnpm install --frozen-lockfile --filter remote-mcp-google-oauth...
       - name: Run TypeScript check
-        run: npm run type-check
+        run: pnpm --filter remote-mcp-google-oauth run type-check
       - name: Validate Cloudflare Worker bundle
-        run: npx wrangler deploy --dry-run
+        run: pnpm --filter remote-mcp-google-oauth exec wrangler deploy --dry-run
 
   upload-source-tests:
     runs-on: ubuntu-latest
