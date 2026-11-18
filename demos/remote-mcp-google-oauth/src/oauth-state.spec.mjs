@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { bindStateToSession, createOAuthState, validateOAuthState } from "./workers-oauth-utils.ts";\nimport { OAuthStateDO } from "./oauth-state-do.ts";
+import { bindStateToSession, createOAuthState, validateOAuthState } from "./workers-oauth-utils.ts";
+import { OAuthStateDO } from "./oauth-state-do.ts";
 
 function createStateStore() {
   const values = new Map();
