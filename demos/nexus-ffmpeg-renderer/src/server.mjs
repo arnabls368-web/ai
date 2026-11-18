@@ -2,7 +2,8 @@ import { createServer } from "node:http";
 import { chmod, mkdir, open, readdir, readFile, rename, rm, lstat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { constants as fsConstants } from "node:fs";
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { extensionForMime, getPrivateAsset, putPrivateAsset, MAX_ASSET_BYTES_LIMIT } from "./storage.mjs";
 import { renderManifest, validateManifest } from "./renderer.mjs";
 import { verifyRenderToken } from "./auth.mjs";
 
@@ -44,6 +45,18 @@ async function readJson(request) {
   } catch {
     throw Object.assign(new Error("Request body must be valid JSON."), { status: 400 });
   }
+}
+
+async function readBinaryLimited(request, limit = MAX_ASSET_BYTES_LIMIT) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of request) {
+    size += chunk.length;
+    if (size > limit) throw Object.assign(new Error("Asset exceeds the 100 MiB limit."), { status: 413 });
+    chunks.push(Buffer.from(chunk));
+  }
+  if (!size) throw Object.assign(new Error("Asset body must not be empty."), { status: 400 });
+  return Buffer.concat(chunks, size);
 }
 
 function publicJob(job) {
@@ -185,10 +198,28 @@ export function createRenderJobServer({
     const outputPath = path.join(jobDirectory(job.id), "render.mp4");
     try {
       await persistJob(job);
+      let renderAssetRoot = assetRoot;
+      let renderAssetMap = job.assetMap;
+      if (process.env.AWS_S3_BUCKET_NAME && job.tenantId && job.projectId) {
+        const temporaryAssetRoot = path.join(assetRoot, job.id);
+        await mkdir(temporaryAssetRoot, { recursive: true, mode: 0o700 });
+        renderAssetRoot = temporaryAssetRoot;
+        renderAssetMap = {};
+        for (const [assetId, declaredName] of Object.entries(job.assetMap)) {
+          if (typeof declaredName !== "string" || path.basename(declaredName) !== declaredName) {
+            throw new Error("Asset map entries must be plain filenames with a supported extension.");
+          }
+          const extension = path.extname(declaredName).toLowerCase();
+          const localName = createHash("sha256").update(assetId).digest("hex") + extension;
+          const bytes = await getPrivateAsset({ tenantId: job.tenantId, projectId: job.projectId, assetId, extension });
+          await writeFile(path.join(temporaryAssetRoot, localName), bytes, { flag: "wx", mode: 0o600 });
+          renderAssetMap[assetId] = localName;
+        }
+      }
       await renderManifest({
         manifest: job.manifest,
-        assetMap: job.assetMap,
-        assetRoot,
+        assetMap: renderAssetMap,
+        assetRoot: renderAssetRoot,
         outputPath,
         ffmpegPath,
       });
@@ -205,6 +236,9 @@ export function createRenderJobServer({
       job.error = String(error?.message ?? error).slice(0, 1000);
       job.completedAt = new Date().toISOString();
     } finally {
+      if (process.env.AWS_S3_BUCKET_NAME && job.tenantId && job.projectId) {
+        await rm(path.join(assetRoot, job.id), { recursive: true, force: true }).catch(() => {});
+      }
       try {
         await persistJob(job);
         await pruneJobs();
@@ -233,16 +267,37 @@ export function createRenderJobServer({
         return json(response, 200, { status: "ok", service: "nexus-render-jobs", persistence: "filesystem" });
       }
       const isSubmission = request.method === "POST" && url.pathname === "/jobs";
+      const assetMatch = request.method === "PUT" ? url.pathname.match(/^\\/assets\\/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})$/) : null;
+      const isAssetUpload = Boolean(assetMatch);
       const claims = requestClaims(request, {
         signingSecret,
         legacyToken: allowLegacyToken ? token : undefined,
-        scope: isSubmission ? "render:submit" : "render:read",
+        scope: isSubmission ? "render:submit" : isAssetUpload ? "asset:write" : "render:read",
       });
       if (!claims) return json(response, 401, { error: "unauthorized" });
 
       if (request.method === "GET" && url.pathname === "/auth-check") {
         if (claims.legacy) return json(response, 401, { error: "signed authorization required" });
         return json(response, 200, { ok: true, service: "nexus-render-jobs", authorization: "signed", scope: claims.scope });
+      }
+
+      if (isAssetUpload) {
+        if (claims.legacy || !claims.tenantId || !claims.projectId) return json(response, 401, { error: "signed project authorization required" });
+        const mimeType = String(request.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
+        if (!extensionForMime(mimeType)) return json(response, 415, { error: "unsupported asset media type" });
+        try {
+          const bytes = await readBinaryLimited(request);
+          const stored = await putPrivateAsset({
+            tenantId: claims.tenantId,
+            projectId: claims.projectId,
+            assetId: assetMatch[1],
+            mimeType,
+            bytes,
+          });
+          return json(response, 201, { assetId: assetMatch[1], filename: assetMatch[1] + stored.extension, bytes: stored.bytes, storage: "private_object_storage" });
+        } catch (error) {
+          return json(response, error.status ?? 502, { error: String(error?.message ?? error).slice(0, 500) });
+        }
       }
 
       if (isSubmission) {
