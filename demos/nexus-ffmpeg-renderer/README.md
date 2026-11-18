@@ -47,6 +47,20 @@ docker run --rm -v "$PWD/render-input:/input" -v "$PWD/render-output:/output" \
   nexus-ffmpeg-renderer /input/manifest.json /input/asset-map.json /input/assets /output/final.mp4
 ```
 
+### Railway volume permissions
+
+Railway mounts persistent volumes as root, even when the image declares a non-root
+user. For this Dockerfile on Railway, set the service variable
+`RAILWAY_RUN_UID=0`. This allows the entrypoint to create the mount paths and
+change ownership of only the `/work` and `/assets` directory roots, then it
+uses `gosu` to run Node as the unprivileged `node` user. It does not recursively
+change ownership or permissions of existing job data. Keep the application
+process non-root; do not remove the `gosu` privilege drop.
+
+Outside Railway, the image defaults to `node` directly. Writable local mounts
+must be owned by the container's `node` UID/GID; the entrypoint fails with a
+clear error rather than attempting privileged changes.
+
 ## Authenticated render-job API
 
 The package includes a Node HTTP service for a **persistent, single-process render API**. It accepts a manifest and asset-ID map, queues a render, exposes job status, and streams the completed MP4. It never accepts remote asset URLs: assets must already exist under the server's configured local asset directory.
