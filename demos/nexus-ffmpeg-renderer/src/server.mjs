@@ -246,8 +246,7 @@ export function createRenderJobServer({
       }
 
       if (isSubmission) {
-        try {
-          const contentType = String(request.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
+        const contentType = String(request.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
           if (contentType !== "application/json") return json(response, 415, { error: "content-type must be application/json" });
           if (queue.length + active + pendingSubmissions >= MAX_QUEUE_SIZE) {
             return json(response, 429, { error: "render queue is full" });
