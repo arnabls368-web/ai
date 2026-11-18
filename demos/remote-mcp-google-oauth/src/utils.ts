@@ -1,4 +1,44 @@
 /**
+ * Parse an upstream JSON response without allowing an unbounded body allocation.
+ * Content-Length is advisory; the streamed byte count is always enforced.
+ */
+export async function readJsonLimited(response: Response, maxBytes = 65_536): Promise<unknown> {
+  const contentLength = response.headers.get("Content-Length");
+  if (contentLength !== null) {
+    const declaredLength = Number(contentLength);
+    if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+      await response.body?.cancel();
+      throw new Error("Upstream JSON response exceeded the size limit.");
+    }
+  }
+  if (!response.body) throw new Error("Upstream JSON response had no body.");
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel();
+        throw new Error("Upstream JSON response exceeded the size limit.");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown;
+}
+
+/**
  * Constructs an authorization URL for Google OAuth.
  */
 export function getUpstreamAuthorizeUrl({
@@ -71,7 +111,7 @@ export async function fetchUpstreamAuthToken({
 
   let body: unknown;
   try {
-    body = await resp.json();
+    body = await readJsonLimited(resp, 65_536);
   } catch {
     console.error("Google token exchange returned invalid JSON");
     return [null, new Response("Google returned an invalid token response", { status: 502 })];
@@ -115,7 +155,7 @@ export async function refreshGoogleAccessToken(
   if (!response.ok) return null;
   let body: unknown;
   try {
-    body = await response.json();
+    body = await readJsonLimited(response, 65_536);
   } catch {
     console.error("Google token refresh returned invalid JSON");
     return null;
