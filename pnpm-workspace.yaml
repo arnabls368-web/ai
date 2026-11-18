@@ -31,6 +31,7 @@ minimumReleaseAgeExclude:
   - "@microsoft/api-extractor@7.58.9"
   - "@rushstack/ts-command-line@5.3.10"
   - "@mantine/charts@9.4.1"
+  - "@mantine/code-highlight@9.4.1"
   - "@mantine/core@9.4.1"
   - "@mantine/dates@9.4.1"
   - "@mantine/form@9.4.1"
