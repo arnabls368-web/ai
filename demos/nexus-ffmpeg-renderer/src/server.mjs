@@ -96,6 +96,7 @@ export function createRenderJobServer({
   allowLegacyToken = process.env.NODE_ENV !== "production",
   assetRoot = process.env.NEXUS_ASSET_ROOT ?? "/assets",
   workRoot = process.env.NEXUS_RENDER_WORKDIR ?? "/work",
+  assetTempRoot = tmpdir(),
   ffmpegPath = process.env.FFMPEG_PATH ?? "ffmpeg",
   maxConcurrent = 1,
 } = {}) {
@@ -308,7 +309,7 @@ export function createRenderJobServer({
         }
         activeAssetUploads += 1;
         try {
-          const uploadDirectory = await mkdtemp(path.join(tmpdir(), "nexus-asset-upload-"));
+          const uploadDirectory = await mkdtemp(path.join(assetTempRoot, "nexus-asset-upload-"));
           const uploadPath = path.join(uploadDirectory, "asset");
           try {
             await writeBinaryLimited(request, uploadPath);
