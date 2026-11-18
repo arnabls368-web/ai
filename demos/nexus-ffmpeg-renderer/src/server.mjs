@@ -48,6 +48,10 @@ async function readJson(request) {
 }
 
 async function readBinaryLimited(request, limit = MAX_ASSET_BYTES_LIMIT) {
+  const declaredLength = request.headers["content-length"];
+  if (declaredLength !== undefined && Number(declaredLength) > limit) {
+    throw Object.assign(new Error("Asset exceeds the 100 MiB limit."), { status: 413 });
+  }
   const chunks = [];
   let size = 0;
   for await (const chunk of request) {
