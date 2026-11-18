@@ -649,7 +649,12 @@ test("restart recovery re-queues jobs interrupted while running", async () => {
     await mkdir(directory, { recursive: true });
     await writeFile(path.join(assetRoot, "scene.jpg"), "image");
     const fakeFfmpeg = path.join(workRoot, "recovery-fake-ffmpeg");
-    await writeFile(fakeFfmpeg, "#!/usr/bin/env node\\nconst fs = require('node:fs');\\nfs.writeFileSync(process.argv.at(-1), 'recovered mp4 output');\\n");
+    await writeFile(fakeFfmpeg, [
+      "#!/usr/bin/env node",
+      "const fs = require('node:fs');",
+      "fs.writeFileSync(process.argv.at(-1), 'recovered mp4 output');",
+      "",
+    ].join("\n"));
     await chmod(fakeFfmpeg, 0o700);
     await writeFile(path.join(directory, "job.json"), JSON.stringify({
       id,
