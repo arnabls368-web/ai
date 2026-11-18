@@ -1,13 +1,9 @@
 name: Deploy NEXUS YouTube MCP to Cloudflare
 
 on:
+  # Production deployment is deliberately manual; pushes and PRs must never
+  # publish a Worker without an explicit operator action.
   workflow_dispatch:
-  push:
-    branches:
-      - feature/youtube-upload-mcp
-    paths:
-      - "demos/remote-mcp-google-oauth/**"
-      - ".github/workflows/youtube-mcp-deploy.yml"
 
 permissions:
   contents: read
