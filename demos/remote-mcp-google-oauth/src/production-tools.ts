@@ -288,7 +288,7 @@ export function registerProductionTools(server: McpServer) {
               executionMode: "manifest_only",
               manifest,
               projectRevision: updated.revision,
-              note: "A separate render service must resolve asset IDs from trusted storage and execute FFmpeg. No media was rendered or uploaded.",
+              note: "The manifest is saved only. Transfer each referenced asset with nexus_transfer_render_asset, then submit it with nexus_submit_render. No media was rendered by this manifest tool.",
             }, null, 2),
           }],
         };
@@ -485,8 +485,8 @@ function registerRendererTools(server: McpServer) {
               signedAuthorization: true,
               tenantAndProjectBound: true,
               assetTransferEnabled: true,
-              renderSubmissionEnabled: false,
-              nextRequirement: "Complete the Worker-side render submission, polling and output handoff workflow.",
+              renderSubmissionEnabled: true,
+              nextRequirement: "Complete the rendered-video output handoff and YouTube upload review flow.",
             }, null, 2),
           }],
         };
