@@ -4,8 +4,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createRenderJobServer } from "../src/server.mjs";
+import { signRenderToken } from "../src/auth.mjs";
 
 const TOKEN = "test-token-that-is-at-least-32-characters-long";
+const SIGNING_SECRET = "test-signing-secret-that-is-at-least-32-characters";
 
 async function startServer(workRoot) {
   const server = createRenderJobServer({
@@ -19,6 +21,27 @@ async function startServer(workRoot) {
     base: `http://127.0.0.1:${address.port}`,
     close: () => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
   };
+}
+
+async function startSignedServer(workRoot) {
+  const server = createRenderJobServer({
+    token: "",
+    signingSecret: SIGNING_SECRET,
+    assetRoot: path.join(workRoot, "assets"),
+    workRoot,
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  return {
+    base: `http://127.0.0.1:${address.port}`,
+    close: () => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
+  };
+}
+
+function signedHeader(tenantId, projectId, scope) {
+  return { authorization: `Bearer ${signRenderToken({
+    secret: SIGNING_SECRET, tenantId, projectId, scope,
+  })}` };
 }
 
 async function withWorkRoot(run) {
@@ -157,6 +180,58 @@ test("job status survives a render-service restart", async () => {
       assert.equal("assetMap" in job, false);
     } finally {
       await restarted.close();
+    }
+  });
+});
+
+test("signed render jobs are isolated by tenant and project", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const server = await startSignedServer(workRoot);
+    try {
+      const submitted = await fetch(`${server.base}/jobs`, {
+        method: "POST",
+        headers: { ...signedHeader("tenant-a", "project-1", "render:submit"), "content-type": "application/json" },
+        body: JSON.stringify(validPayload()),
+      });
+      assert.equal(submitted.status, 202);
+      const { id } = await submitted.json();
+
+      const wrongTenant = await fetch(`${server.base}/jobs/${id}`, {
+        headers: signedHeader("tenant-b", "project-1", "render:read"),
+      });
+      assert.equal(wrongTenant.status, 404);
+
+      const wrongProject = await fetch(`${server.base}/jobs/${id}`, {
+        headers: signedHeader("tenant-a", "project-2", "render:read"),
+      });
+      assert.equal(wrongProject.status, 404);
+
+      const owner = await fetch(`${server.base}/jobs/${id}`, {
+        headers: signedHeader("tenant-a", "project-1", "render:read"),
+      });
+      assert.equal(owner.status, 200);
+      const publicRecord = await owner.json();
+      assert.equal(publicRecord.id, id);
+      assert.equal("tenantId" in publicRecord, false);
+      assert.equal("projectId" in publicRecord, false);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("signed render API enforces separate submit and read scopes", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const server = await startSignedServer(workRoot);
+    try {
+      const denied = await fetch(`${server.base}/jobs`, {
+        method: "POST",
+        headers: { ...signedHeader("tenant-a", "project-1", "render:read"), "content-type": "application/json" },
+        body: JSON.stringify(validPayload()),
+      });
+      assert.equal(denied.status, 401);
+    } finally {
+      await server.close();
     }
   });
 });
