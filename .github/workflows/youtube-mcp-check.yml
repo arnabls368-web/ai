@@ -33,7 +33,7 @@ jobs:
       - name: Verify Worker-to-renderer signed token compatibility
         run: node --experimental-strip-types --test demos/remote-mcp-google-oauth/src/render-auth.spec.mjs
       - name: Verify browser-bound one-time OAuth state
-        run: node --experimental-strip-types --test demos/remote-mcp-google-oauth/src/oauth-state.spec.mjs
+        run: node --experimental-transform-types --test demos/remote-mcp-google-oauth/src/oauth-state.spec.mjs
       - name: Validate Cloudflare Worker bundle
         run: pnpm --filter remote-mcp-google-oauth exec wrangler deploy --dry-run
 
