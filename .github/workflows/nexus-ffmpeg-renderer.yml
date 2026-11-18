@@ -30,3 +30,9 @@ jobs:
         run: node --test demos/nexus-ffmpeg-renderer/test/*.test.mjs
       - name: Build renderer container
         run: docker build -t nexus-ffmpeg-renderer demos/nexus-ffmpeg-renderer
+      - name: Smoke-test real FFmpeg encode in the container
+        run: |
+          docker run --rm --entrypoint sh nexus-ffmpeg-renderer -ec '
+            ffmpeg -hide_banner -loglevel error -f lavfi -i color=c=black:s=320x180:d=1 -frames:v 24 -c:v libx264 -pix_fmt yuv420p -movflags +faststart -y /tmp/nexus-smoke.mp4
+            ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height -of csv=s=x:p=0 /tmp/nexus-smoke.mp4
+          '
