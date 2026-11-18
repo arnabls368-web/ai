@@ -57,8 +57,11 @@ export function validateManifest(manifest, assetMap) {
   }
   for (const trackName of ["voiceover", "music"]) {
     const track = manifest.tracks[trackName];
-    if (track && (!track.assetId || !assetMap[track.assetId])) {
+    if (track && (!track.assetId || !Object.hasOwn(assetMap, track.assetId) || typeof assetMap[track.assetId] !== "string")) {
       fail(`No local asset mapping was supplied for the ${trackName} asset.`);
+    }
+    if (track && !AUDIO_EXTENSIONS.has(path.extname(assetMap[track.assetId]).toLowerCase())) {
+      fail(`The ${trackName} track uses an unsupported audio file type.`);
     }
   }
 }
@@ -82,7 +85,7 @@ export async function buildFfmpegArgs(manifest, assetMap, assetRoot, outputPath)
   for (const scene of manifest.tracks.video) {
     const file = await resolveAsset(assetRoot, assetMap[scene.assetId]);
     const image = IMAGE_EXTENSIONS.has(path.extname(file).toLowerCase());
-    if (image) args.push("-loop", "1", "-framerate", String(fps), "-t", String(scene.durationSeconds), "-i", file);
+    if (image) args.push("-protocol_whitelist", "file", "-loop", "1", "-framerate", String(fps), "-t", String(scene.durationSeconds), "-i", file);
     else args.push("-protocol_whitelist", "file", "-stream_loop", "-1", "-i", file);
     inputs.push({ scene, index: inputs.length });
   }
@@ -97,7 +100,7 @@ export async function buildFfmpegArgs(manifest, assetMap, assetRoot, outputPath)
   if (manifest.tracks.music) {
     musicIndex = inputs.length + (voiceIndex === undefined ? 0 : 1);
     const file = await resolveAsset(assetRoot, assetMap[manifest.tracks.music.assetId]);
-    args.push("-stream_loop", "-1", "-i", file);
+    args.push("-protocol_whitelist", "file", "-stream_loop", "-1", "-i", file);
   }
 
   const filters = [];
