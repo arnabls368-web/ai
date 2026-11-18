@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { createReadStream } from "node:fs";
-import { chmod, fstat, mkdir, readdir, readFile, rename, rm, lstat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, open, readdir, readFile, rename, rm, lstat, writeFile } from "node:fs/promises";
 simport
 import path from "node:path";
 import { constants as fsConstants } from "node:fs";
@@ -296,14 +296,32 @@ export function createRenderJobServer({
         if (job.status !== "succeeded" || !job.outputPath) {
           return json(response, 409, { error: "render output is not ready", status: job.status });
         }
-        const outputStream = createReadStream(job.outputPath, { flags: fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW });
-        outputStream.once("open", async (fd) => {
-          try {
-            const openedFile = await fstat(fd);
-            if (!openedFile.isFile() || openedFile.size === 0) {
-              outputStream.destroy();
-              if (!response.headersSent) json(response, 500, { error: "render output is not a regular file" });
-              return;
+        let outputHandle;
+        try {
+          outputHandle = await open(job.outputPath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+          const openedFile = await outputHandle.stat();
+          if (!openedFile.isFile() || openedFile.size === 0) {
+            await outputHandle.close();
+            return json(response, 500, { error: "render output is not a regular file" });
+          }
+        } catch {
+          if (outputHandle) await outputHandle.close().catch(() => {});
+          return json(response, 500, { error: "render output could not be verified" });
+        }
+        const outputStream = outputHandle.createReadStream();
+        outputStream.once("error", () => {
+          if (!response.headersSent) json(response, 500, { error: "render output could not be read" });
+          else response.destroy();
+        });
+        response.writeHead(200, {
+          "content-type": "video/mp4",
+          "content-disposition": 'attachment; filename="nexus-render.mp4"',
+          "cache-control": "no-store",
+          "content-length": String((await outputHandle.stat()).size),
+          "x-content-type-options": "nosniff",
+        });
+        outputStream.pipe(response);
+
             }
             response.writeHead(200, {
               "content-type": "video/mp4",
