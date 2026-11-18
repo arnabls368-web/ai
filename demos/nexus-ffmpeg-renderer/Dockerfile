@@ -16,4 +16,4 @@ COPY test ./test
 ENV NODE_ENV=production
 EXPOSE 8080
 ENTRYPOINT ["node"]
-CMD ["src/cli.mjs"]
+CMD ["src/server.mjs"]
