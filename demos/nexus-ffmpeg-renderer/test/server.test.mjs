@@ -17,7 +17,6 @@ async function startServer(workRoot, { ffmpegPath } = {}) {
     assetRoot: path.join(workRoot, "assets"),
     workRoot,
     ffmpegPath,
-    assetTempRoot,
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
@@ -35,6 +34,14 @@ async function startSignedServer(workRoot, { ffmpegPath, assetTempRoot } = {}) {
     assetRoot: path.join(workRoot, "assets"),
     workRoot,
     ffmpegPath,
+async function startSignedServer(workRoot, { ffmpegPath, assetTempRoot } = {}) {
+  const server = createRenderJobServer({
+    token: "",
+    signingSecret: SIGNING_SECRET,
+    assetRoot: path.join(workRoot, "assets"),
+    workRoot,
+    ffmpegPath,
+    assetTempRoot,
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
