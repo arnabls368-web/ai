@@ -227,7 +227,7 @@ app.get("/callback", async (c) => {
 	if (googleErrResponse) {
 		return failWithClearedSession(googleErrResponse);
 	}
-	if (!googleTokens) return c.text("Google did not return an access token", 500);
+	if (!googleTokens) return failWithClearedSession(c.text("Google did not return an access token", 500));
 	const { accessToken, refreshToken } = googleTokens;
 
 	// Fetch the user info from Google
