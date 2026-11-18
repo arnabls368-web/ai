@@ -109,6 +109,9 @@ export function registerProviderTools(server: McpServer) {
       try {
         const apiKey = secret("FAL_KEY");
         if (!apiKey) throw new Error("fal.ai is not configured on this Worker. Add FAL_KEY as a Cloudflare Worker secret.");
+        // Resolve the authenticated account before starting a billable external job.
+        // This prevents an untracked paid job if the request has no valid account scope.
+        const scope = await accountScope();
         const url = `https://queue.fal.run/${endpointId}`;
         const submitted = await providerJson(url, {
           method: "POST",
@@ -118,7 +121,6 @@ export function registerProviderTools(server: McpServer) {
         if (typeof submitted.request_id !== "string" || typeof submitted.status_url !== "string" || typeof submitted.response_url !== "string") {
           throw new Error("fal.ai returned an incomplete queue response; no job record was saved.");
         }
-        const scope = await accountScope();
         const record = {
           endpointId,
           requestId: submitted.request_id,
