@@ -687,6 +687,8 @@ async function googleApiGet(url: string, auth: GoogleAuthProps): Promise<any> {
   if (!auth.accessToken) throw new Error("Google account is not connected. Reconnect your account.");
   const request = (token: string) => fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
+    // Never forward an OAuth bearer token across an API redirect.
+    redirect: "error",
   });
   let response = await request(auth.accessToken);
   if (response.status === 401 && auth.refreshToken) {
