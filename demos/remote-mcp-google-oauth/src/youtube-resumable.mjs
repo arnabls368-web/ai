@@ -14,9 +14,8 @@ export function nextUploadOffset(rangeHeader, totalBytes) {
 }
 
 /**
- * Upload a complete buffer through a resumable session, checking server state
- * after interruptions/5xx responses and continuing from the first uncommitted
- * byte. A single whole-buffer PUT is still used when the first attempt works.
+ * Upload a complete buffer through a resumable session. If a PUT is interrupted
+ * or receives a 5xx response, query the session before sending any more bytes.
  */
 export async function uploadResumableVideo({
   uploadUrl,
@@ -35,9 +34,42 @@ export async function uploadResumableVideo({
 
   const totalBytes = videoBytes.byteLength;
   let offset = 0;
+  let mustCheckStatus = false;
   let lastFailure;
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (mustCheckStatus) {
+      try {
+        const status = await fetchImpl(uploadUrl, {
+          method: "PUT",
+          redirect: "error",
+          signal: AbortSignal.timeout(30_000),
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Range": `bytes */${totalBytes}`,
+          },
+          body: new ArrayBuffer(0),
+        });
+        if (status.status === 308) {
+          offset = nextUploadOffset(status.headers.get("Range"), totalBytes);
+          await status.body?.cancel();
+          if (offset >= totalBytes) {
+            throw new Error("YouTube reported an incomplete upload after acknowledging every byte.");
+          }
+          mustCheckStatus = false;
+        } else if (status.ok || status.status < 500) {
+          return status;
+        } else {
+          lastFailure = new Error(`YouTube upload status check temporarily failed (HTTP ${status.status}).`);
+          await status.body?.cancel();
+          continue;
+        }
+      } catch (error) {
+        lastFailure = error instanceof Error ? error : new Error("YouTube upload status check failed.");
+        continue;
+      }
+    }
+
     try {
       const headers = new Headers({
         Authorization: `Bearer ${accessToken}`,
@@ -65,36 +97,10 @@ export async function uploadResumableVideo({
       if (uploaded.ok || uploaded.status < 500) return uploaded;
       lastFailure = new Error(`YouTube upload temporarily failed (HTTP ${uploaded.status}).`);
       await uploaded.body?.cancel();
+      mustCheckStatus = true;
     } catch (error) {
       lastFailure = error instanceof Error ? error : new Error("Video upload connection failed.");
-    }
-
-    // The previous PUT may have reached YouTube even if its response was lost.
-    // Ask the session before retransmitting so we never blindly duplicate bytes.
-    try {
-      const status = await fetchImpl(uploadUrl, {
-        method: "PUT",
-        redirect: "error",
-        signal: AbortSignal.timeout(30_000),
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Range": `bytes */${totalBytes}`,
-        },
-        body: new ArrayBuffer(0),
-      });
-      if (status.status === 308) {
-        offset = nextUploadOffset(status.headers.get("Range"), totalBytes);
-        await status.body?.cancel();
-        if (offset >= totalBytes) {
-          throw new Error("YouTube reported an incomplete upload after acknowledging every byte.");
-        }
-        continue;
-      }
-      if (status.ok || status.status < 500) return status;
-      lastFailure = new Error(`YouTube upload status check temporarily failed (HTTP ${status.status}).`);
-      await status.body?.cancel();
-    } catch (error) {
-      lastFailure = error instanceof Error ? error : new Error("YouTube upload status check failed.");
+      mustCheckStatus = true;
     }
   }
 
