@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createRenderJobServer } from "../src/server.mjs";
@@ -9,11 +9,12 @@ import { signRenderToken } from "../src/auth.mjs";
 const TOKEN = "test-token-that-is-at-least-32-characters-long";
 const SIGNING_SECRET = "test-signing-secret-that-is-at-least-32-characters";
 
-async function startServer(workRoot) {
+async function startServer(workRoot, { ffmpegPath } = {}) {
   const server = createRenderJobServer({
     token: TOKEN,
     assetRoot: path.join(workRoot, "assets"),
     workRoot,
+    ffmpegPath,
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
@@ -92,7 +93,7 @@ test("HTTP server applies bounded request and keep-alive timeouts", async () => 
   });
 });
 
-test("restricts persisted job and rendered output permissions", async () => {
+test("restricts persisted job storage permissions", async () => {
   await withWorkRoot(async (workRoot) => {
     const instance = await startServer(workRoot);
     try {
@@ -138,6 +139,38 @@ test("health endpoint is available without credentials", async () => {
   });
 });
 
+test("stores completed render outputs with owner-only permissions", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const assetRoot = path.join(workRoot, "assets");
+    await mkdir(assetRoot, { recursive: true });
+    await writeFile(path.join(assetRoot, "scene.jpg"), "image");
+    const fakeFfmpeg = path.join(workRoot, "fake-ffmpeg");
+    await writeFile(fakeFfmpeg, "#!/usr/bin/env node\nconst fs = require('node:fs');\nfs.writeFileSync(process.argv.at(-1), 'fake mp4 output');\n");
+    await chmod(fakeFfmpeg, 0o700);
+    const instance = await startServer(workRoot, { ffmpegPath: fakeFfmpeg });
+    try {
+      const response = await fetch(`${instance.base}/jobs`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify(validPayload()),
+      });
+      assert.equal(response.status, 202);
+      const { id } = await response.json();
+      let job;
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const status = await fetch(`${instance.base}/jobs/${id}`, { headers: { authorization: `Bearer ${TOKEN}` } });
+        job = await status.json();
+        if (job.status === "succeeded" || job.status === "failed") break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.equal(job.status, "succeeded");
+      const output = await stat(path.join(workRoot, id, "render.mp4"));
+      assert.equal(output.mode & 0o777, 0o600);
+    } finally {
+      await instance.close();
+    }
+  });
+});
 test("job API rejects missing bearer credentials", async () => {
   await withWorkRoot(async (workRoot) => {
     const server = await startServer(workRoot);
