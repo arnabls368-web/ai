@@ -7,7 +7,7 @@ Status: partially implemented and deployed; production end-to-end verification i
 - The feature-branch renderer Dockerfile now declares `USER node`. Its entrypoint expects Railway's documented `RAILWAY_RUN_UID=0` override so the entrypoint starts with root privileges, prepares only the mounted `/work` and `/assets` directory roots, and then drops the Node application to the unprivileged `node` account with `gosu`.
 - The currently configured Railway renderer service does **not** have `RAILWAY_RUN_UID` set. Do not deploy this Dockerfile revision to the existing service until that variable is explicitly configured and the rollout is approved; otherwise the entrypoint will start as `node` and cannot chown the root-owned mounted volume.
 - Railway's official volume guidance documents `RAILWAY_RUN_UID=0` as the runtime override for images that need access to root-owned volume mounts. This does not change volume ownership; the application still drops to `node` after initialization.
-- Latest branch head: `d55e416c74348cba865818fb642f20d3f8c175a2`. Its main CI, renderer workflow (including Docker build, FFmpeg smoke encode, non-root startup and persistent-volume preservation test), YouTube deployment-bundle build, type check, uploader source tests, and Semgrep scan all completed successfully. Semgrep reported **0 findings** across 749 tracked files (517 rules run).
+- Latest branch head: `4ac7a7b9c786c5185c6669d169870f633965bda2`. Its main CI, renderer workflow (including Docker build, FFmpeg smoke encode, non-root startup and persistent-volume preservation test), YouTube deployment-bundle build, type check, uploader source tests, and Semgrep scan all completed successfully. Semgrep reported **0 findings** across 749 tracked files (517 rules run).
 - The YouTube MCP Cloudflare deployment workflow is now manual-only (`workflow_dispatch`); pushing to the feature branch cannot automatically deploy the Worker.
 
 ## Current architecture
@@ -38,7 +38,7 @@ Status: partially implemented and deployed; production end-to-end verification i
 - Renderer storage code signs S3-compatible PUT and GET requests and uses tenant/project-scoped object keys.
 - Automated storage tests verify signing, virtual-host addressing, and PUT/GET round trips against a mocked storage endpoint.
 - Renderer tests cover manifest validation, signed authorization, job ownership, bounded queue recovery, symlink defenses, and owner-only local file permissions.
-- Latest CI on `d55e416c74348cba865818fb642f20d3f8c175a2` passed the main CI workflow, renderer Docker build and FFmpeg smoke encode, non-root startup and volume-preservation checks, Worker type check, uploader source tests, and deployment-bundle build. Semgrep scanned 749 tracked files with 517 rules and reported zero findings.
+- Latest CI on `4ac7a7b9c786c5185c6669d169870f633965bda2` passed the main CI workflow, renderer Docker build and FFmpeg smoke encode, non-root startup and volume-preservation checks, Worker type check, uploader source tests, and deployment-bundle build. Semgrep scanned 749 tracked files with 517 rules and reported zero findings.
 - The latest Semgrep scan completed successfully with zero findings. This scan result does not replace live-provider verification or the Railway volume configuration prerequisite.
 - The deployed renderer health endpoint has returned HTTP 200, and the latest deployment started successfully.
 
