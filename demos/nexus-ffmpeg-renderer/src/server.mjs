@@ -68,12 +68,14 @@ function publicJob(job) {
 export function createRenderJobServer({
   token = process.env.NEXUS_RENDER_TOKEN,
   signingSecret = process.env.NEXUS_RENDER_SIGNING_SECRET,
+  allowLegacyToken = process.env.NODE_ENV !== "production",
   assetRoot = process.env.NEXUS_ASSET_ROOT ?? "/assets",
   workRoot = process.env.NEXUS_RENDER_WORKDIR ?? "/work",
   maxConcurrent = 1,
 } = {}) {
   if (signingSecret && signingSecret.length < 32) throw new Error("NEXUS_RENDER_SIGNING_SECRET must contain at least 32 characters.");
-  if (!signingSecret && (!token || token.length < 32)) throw new Error("Configure NEXUS_RENDER_SIGNING_SECRET (recommended) or a legacy NEXUS_RENDER_TOKEN of at least 32 characters.");
+  if (!signingSecret && !allowLegacyToken) throw new Error("NEXUS_RENDER_SIGNING_SECRET is required when NODE_ENV=production.");
+  if (!signingSecret && (!token || token.length < 32)) throw new Error("Configure NEXUS_RENDER_SIGNING_SECRET or a legacy NEXUS_RENDER_TOKEN of at least 32 characters for local development.");
   if (!Number.isInteger(maxConcurrent) || maxConcurrent < 1 || maxConcurrent > 2) {
     throw new Error("maxConcurrent must be 1 or 2.");
   }
@@ -200,7 +202,7 @@ export function createRenderJobServer({
       const isSubmission = request.method === "POST" && url.pathname === "/jobs";
       const claims = requestClaims(request, {
         signingSecret,
-        legacyToken: token,
+        legacyToken: allowLegacyToken ? token : undefined,
         scope: isSubmission ? "render:submit" : "render:read",
       });
       if (!claims) return json(response, 401, { error: "unauthorized" });
