@@ -177,10 +177,6 @@ app.get("/callback", async (c) => {
 		return c.text("Internal server error", 500);
 	}
 
-	if (!oauthReqInfo.clientId) {
-		return c.text("Invalid OAuth request data", 400);
-	}
-
 	const failWithClearedSession = (response: Response) => {
 		const headers = new Headers(response.headers);
 		headers.set("Set-Cookie", clearSessionCookie);
@@ -190,6 +186,10 @@ app.get("/callback", async (c) => {
 			headers,
 		});
 	};
+
+	if (!oauthReqInfo.clientId) {
+		return failWithClearedSession(c.text("Invalid OAuth request data", 400));
+	}
 
 	// Google can return an OAuth error instead of a code when the user
 	// cancels consent or the upstream authorization request fails. State has
@@ -276,21 +276,28 @@ app.get("/callback", async (c) => {
 		? userInfo.name.trim().slice(0, 200)
 		: email;
 
-	// Return back to the MCP client a new token
-	const { redirectTo } = await c.env.OAUTH_PROVIDER.completeAuthorization({
-		metadata: {
-			label: name,
-		},
-		props: {
-			accessToken,
-			refreshToken,
-			email,
-			name,
-		} as Props,
-		request: oauthReqInfo,
-		scope: oauthReqInfo.scope,
-		userId: id,
-	});
+	// Return back to the MCP client a new token. State is already consumed,
+	// so clear the browser binding even if the provider cannot complete the flow.
+	let redirectTo: string;
+	try {
+		({ redirectTo } = await c.env.OAUTH_PROVIDER.completeAuthorization({
+			metadata: {
+				label: name,
+			},
+			props: {
+				accessToken,
+				refreshToken,
+				email,
+				name,
+			} as Props,
+			request: oauthReqInfo,
+			scope: oauthReqInfo.scope,
+			userId: id,
+		}));
+	} catch (error) {
+		console.error("OAuth authorization completion failed:", error);
+		return failWithClearedSession(c.text("Could not complete Google authorization. Please reconnect.", 500));
+	}
 
 	// Clear the session binding cookie (one-time use) by creating response with headers
 	const headers = new Headers({ Location: redirectTo });
