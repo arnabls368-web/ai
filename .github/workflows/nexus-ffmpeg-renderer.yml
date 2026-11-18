@@ -42,11 +42,19 @@ jobs:
             test "$(id -u)" -ne 0
             touch /work/non-root-startup-check /assets/non-root-startup-check
           '
-      - name: Verify Railway root-owned volume initialization drops privileges
+      - name: Verify Railway volume initialization preserves existing job data and drops privileges
         run: |
-          docker run --rm --user 0:0 --tmpfs /work nexus-ffmpeg-renderer sh -ec '
+          docker volume create nexus-renderer-volume-ownership-test
+          trap 'docker volume rm -f nexus-renderer-volume-ownership-test >/dev/null' EXIT
+          docker run --rm --mount source=nexus-renderer-volume-ownership-test,target=/work --entrypoint sh nexus-ffmpeg-renderer -ec '
             test "$(id -u)" -ne 0
-            test -w /work
+            printf "existing-job-data" > /work/existing-job.json
+          '
+          docker run --rm --user 0:0 --mount source=nexus-renderer-volume-ownership-test,target=/work nexus-ffmpeg-renderer sh -ec '
+            test "$(id -u)" -ne 0
+            test "$(cat /work/existing-job.json)" = "existing-job-data"
+            test "$(stat -c %u /work/existing-job.json)" = "1000"
+            printf "-preserved" >> /work/existing-job.json
             test -w /assets
-            touch /work/railway-volume-startup-check /assets/railway-volume-startup-check
+            touch /assets/railway-volume-startup-check
           '
