@@ -120,8 +120,25 @@ export function createRenderJobServer({
     for (const entry of entries) {
       if (!entry.isDirectory() || !UUID_PATTERN.test(entry.name)) continue;
       try {
-        const record = JSON.parse(await readFile(path.join(workRoot, entry.name, "job.json"), "utf8"));
-        if (!record || record.id !== entry.name || !["queued", "running", "succeeded", "failed"].includes(record.status)) continue;
+        const directoryPath = path.join(workRoot, entry.name);
+        const directoryInfo = await lstat(directoryPath);
+        if (!directoryInfo.isDirectory()) continue;
+        const recordPath = path.join(directoryPath, "job.json");
+        const recordInfo = await lstat(recordPath);
+        if (!recordInfo.isFile() || recordInfo.size > MAX_BODY_BYTES) continue;
+        const record = JSON.parse(await readFile(recordPath, "utf8"));
+        if (!record || typeof record !== "object" || Array.isArray(record) ||
+            record.id !== entry.name || !["queued", "running", "succeeded", "failed"].includes(record.status) ||
+            typeof record.createdAt !== "string" || !Number.isFinite(Date.parse(record.createdAt)) ||
+            !record.manifest || typeof record.manifest !== "object" || Array.isArray(record.manifest) ||
+            !record.assetMap || typeof record.assetMap !== "object" || Array.isArray(record.assetMap) ||
+            Object.keys(record.assetMap).length > 502 ||
+            Object.entries(record.assetMap).some(([id, file]) =>
+              !id || id.length > 128 || typeof file !== "string" || !file || file.length > 512 || file.includes("\\0")) ||
+            !((record.tenantId === null && record.projectId === null) ||
+              (typeof record.tenantId === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(record.tenantId) &&
+               typeof record.projectId === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(record.projectId)))) continue;
+        validateManifest(record.manifest, record.assetMap);
         const job = { ...record };
         if (job.status === "running" || job.status === "queued") {
           job.status = "queued";
