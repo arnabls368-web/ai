@@ -267,7 +267,7 @@ export function createRenderJobServer({
         return json(response, 200, { status: "ok", service: "nexus-render-jobs", persistence: "filesystem" });
       }
       const isSubmission = request.method === "POST" && url.pathname === "/jobs";
-      const assetMatch = request.method === "PUT" ? url.pathname.match(/^\\/assets\\/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})$/) : null;
+      const assetMatch = request.method === "PUT" ? url.pathname.match(/^\/assets\/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})$/) : null;
       const isAssetUpload = Boolean(assetMatch);
       const claims = requestClaims(request, {
         signingSecret,
