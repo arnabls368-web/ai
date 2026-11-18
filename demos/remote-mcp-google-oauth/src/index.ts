@@ -11,6 +11,7 @@ import { callPrivateRenderer } from "./render-auth";
 import { hasExactlyOneUploadSource, isVerifiedRenderJob } from "./upload-source.mjs";
 import { uploadResumableVideo } from "./youtube-resumable.mjs";
 import { requestHumanApproval } from "./human-approval.mjs";
+import { serializeApprovalBinding } from "./approval-binding.mjs";
 
 export type Props = {
   name: string;
@@ -222,15 +223,13 @@ function createServer() {
           : "External HTTPS source host " + new URL(videoUrl!).hostname;
         const approvalDigest = await crypto.subtle.digest(
           "SHA-256",
-          new TextEncoder().encode([
+          new TextEncoder().encode(serializeApprovalBinding([
             auth.email.trim().toLowerCase(),
             videoSha256,
             title,
             description || "",
             privacyStatus,
-          ].length ? JSON.stringify([
-            auth.email.trim().toLowerCase(), videoSha256, title, description || "", privacyStatus,
-          ]) : ""),
+          ])),
         );
         const approvalKey = "youtube-upload-" + Array.from(new Uint8Array(approvalDigest), (value) => value.toString(16).padStart(2, "0")).join("");
         const approval = requestHumanApproval(
