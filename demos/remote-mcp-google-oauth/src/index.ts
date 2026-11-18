@@ -8,7 +8,7 @@ import { readJsonLimited, refreshGoogleAccessToken } from "./utils";
 import { registerProductionTools } from "./production-tools";
 import { registerProviderTools } from "./provider-tools";
 import { callPrivateRenderer } from "./render-auth";
-import { hasExactlyOneUploadSource, isVerifiedRenderJob } from "./upload-source";
+import { hasExactlyOneUploadSource, isVerifiedRenderJob } from "./upload-source.mjs";
 
 export type Props = {
   name: string;
