@@ -184,7 +184,7 @@ export function registerProviderTools(server: McpServer) {
     async () => result({
       exa: secret("EXA_API_KEY") ? "configured" : "missing_EXA_API_KEY",
       fal: secret("FAL_KEY") ? "configured" : "missing_FAL_KEY",
-      vidIQ: "ChatGPT connection available to this assistant; no vidIQ API credential is configured in this MCP Worker",
+      vidIQ: "not configured in this NEXUS Worker; connect the separate vidIQ MCP server in your MCP client if needed",
       note: "ChatGPT app connections do not automatically transfer credentials or tool access to Claude. Configure provider API keys as Worker secrets.",
     }),
   );
