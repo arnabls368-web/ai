@@ -3,6 +3,8 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 
 const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"]);
+const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".m4v", ".webm", ".mkv"]);
+const AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"]);
 
 function fail(message) {
   throw new Error(message);
@@ -44,7 +46,9 @@ export function validateManifest(manifest, assetMap) {
     }
     if (Math.abs(scene.startSeconds - cursor) > 0.01) fail("Video scenes must be contiguous and ordered without gaps or overlaps.");
     if (!scene.assetId || typeof scene.assetId !== "string") fail(`Scene ${index + 1} is missing an asset ID.`);
-    if (!assetMap[scene.assetId]) fail(`No local asset mapping was supplied for scene asset ${scene.assetId}.`);
+    if (!Object.hasOwn(assetMap, scene.assetId) || typeof assetMap[scene.assetId] !== "string") fail(`No local asset mapping was supplied for scene asset ${scene.assetId}.`);
+    const extension = path.extname(assetMap[scene.assetId]).toLowerCase();
+    if (!IMAGE_EXTENSIONS.has(extension) && !VIDEO_EXTENSIONS.has(extension)) fail(`Scene ${index + 1} uses an unsupported media file type.`);
     if (!["cover", "contain"].includes(scene.fit ?? "cover")) fail(`Scene ${index + 1} has an unsupported fit mode.`);
     cursor += scene.durationSeconds;
   }
@@ -73,13 +77,13 @@ export async function buildFfmpegArgs(manifest, assetMap, assetRoot, outputPath)
   validateManifest(manifest, assetMap);
   const [width, height] = resolutionSize(manifest.output.resolution, manifest.aspectRatio);
   const fps = Number(manifest.output.frameRate);
-  const args = ["-hide_banner", "-loglevel", "error", "-y"];
+  const args = ["-hide_banner", "-loglevel", "error", "-nostdin", "-y"];
   const inputs = [];
   for (const scene of manifest.tracks.video) {
     const file = await resolveAsset(assetRoot, assetMap[scene.assetId]);
     const image = IMAGE_EXTENSIONS.has(path.extname(file).toLowerCase());
     if (image) args.push("-loop", "1", "-framerate", String(fps), "-t", String(scene.durationSeconds), "-i", file);
-    else args.push("-stream_loop", "-1", "-i", file);
+    else args.push("-protocol_whitelist", "file", "-stream_loop", "-1", "-i", file);
     inputs.push({ scene, index: inputs.length });
   }
 
@@ -88,7 +92,7 @@ export async function buildFfmpegArgs(manifest, assetMap, assetRoot, outputPath)
   if (manifest.tracks.voiceover) {
     voiceIndex = inputs.length;
     const file = await resolveAsset(assetRoot, assetMap[manifest.tracks.voiceover.assetId]);
-    args.push("-i", file);
+    args.push("-protocol_whitelist", "file", "-i", file);
   }
   if (manifest.tracks.music) {
     musicIndex = inputs.length + (voiceIndex === undefined ? 0 : 1);
