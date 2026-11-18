@@ -1,9 +1,10 @@
 import { createServer } from "node:http";
-import { chmod, mkdir, open, readdir, readFile, rename, rm, lstat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { chmod, mkdir, mkdtemp, open, readdir, readFile, rename, rm, lstat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { constants as fsConstants } from "node:fs";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
-import { extensionForMime, getPrivateAsset, putPrivateAsset, MAX_ASSET_BYTES_LIMIT } from "./storage.mjs";
+import { extensionForMime, getPrivateAsset, putPrivateAssetFile, MAX_ASSET_BYTES_LIMIT } from "./storage.mjs";
 import { renderManifest, validateManifest } from "./renderer.mjs";
 import { verifyRenderToken } from "./auth.mjs";
 
@@ -47,20 +48,26 @@ async function readJson(request) {
   }
 }
 
-async function readBinaryLimited(request, limit = MAX_ASSET_BYTES_LIMIT) {
+async function writeBinaryLimited(request, filePath, limit = MAX_ASSET_BYTES_LIMIT) {
   const declaredLength = request.headers["content-length"];
   if (declaredLength !== undefined && Number(declaredLength) > limit) {
     throw Object.assign(new Error("Asset exceeds the 100 MiB limit."), { status: 413 });
   }
-  const chunks = [];
+  const handle = await open(filePath, "wx", 0o600);
   let size = 0;
-  for await (const chunk of request) {
-    size += chunk.length;
-    if (size > limit) throw Object.assign(new Error("Asset exceeds the 100 MiB limit."), { status: 413 });
-    chunks.push(Buffer.from(chunk));
+  try {
+    for await (const chunk of request) {
+      size += chunk.length;
+      if (size > limit) {
+        throw Object.assign(new Error("Asset exceeds the 100 MiB limit."), { status: 413 });
+      }
+      await handle.writeFile(chunk);
+    }
+    if (!size) throw Object.assign(new Error("Asset body must not be empty."), { status: 400 });
+    return size;
+  } finally {
+    await handle.close();
   }
-  if (!size) throw Object.assign(new Error("Asset body must not be empty."), { status: 400 });
-  return Buffer.concat(chunks, size);
 }
 
 function publicJob(job) {
@@ -295,15 +302,21 @@ export function createRenderJobServer({
         const mimeType = String(request.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
         if (!extensionForMime(mimeType)) return json(response, 415, { error: "unsupported asset media type" });
         try {
-          const bytes = await readBinaryLimited(request);
-          const stored = await putPrivateAsset({
-            tenantId: claims.tenantId,
-            projectId: claims.projectId,
-            assetId: assetMatch[1],
-            mimeType,
-            bytes,
-          });
-          return json(response, 201, { assetId: assetMatch[1], filename: assetMatch[1] + stored.extension, bytes: stored.bytes, storage: "private_object_storage" });
+          const uploadDirectory = await mkdtemp(path.join(tmpdir(), "nexus-asset-upload-"));
+          const uploadPath = path.join(uploadDirectory, "asset");
+          try {
+            await writeBinaryLimited(request, uploadPath);
+            const stored = await putPrivateAssetFile({
+              tenantId: claims.tenantId,
+              projectId: claims.projectId,
+              assetId: assetMatch[1],
+              mimeType,
+              filePath: uploadPath,
+            });
+            return json(response, 201, { assetId: assetMatch[1], filename: assetMatch[1] + stored.extension, bytes: stored.bytes, storage: "private_object_storage" });
+          } finally {
+            await rm(uploadDirectory, { recursive: true, force: true });
+          }
         } catch (error) {
           return json(response, error.status ?? 502, { error: String(error?.message ?? error).slice(0, 500) });
         }
