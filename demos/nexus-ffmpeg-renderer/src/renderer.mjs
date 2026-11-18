@@ -1,4 +1,4 @@
-import { realpath, stat } from "node:fs/promises";
+import { lstat, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 
@@ -178,5 +178,9 @@ export async function renderManifest({ manifest, assetMap, assetRoot, outputPath
       else reject(new Error(`FFmpeg exited with code ${code}: ${stderr.trim()}`));
     });
   });
+  const output = await lstat(outputPath);
+  if (!output.isFile() || output.size === 0) {
+    throw new Error("FFmpeg completed without producing a non-empty regular output file.");
+  }
   return { outputPath, durationSeconds: manifest.durationSeconds, format: "mp4" };
 }
