@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { env } from "cloudflare:workers";
 import { getMcpAuthContext } from "agents/mcp/server";
+import { readJsonLimited } from "./utils.js";
 
 type RuntimeEnv = Record<string, unknown>;
 
@@ -37,14 +38,28 @@ function trustedFalUrl(value: string): string {
 
 async function providerJson(url: string, init: RequestInit, provider: string): Promise<any> {
   // Provider-returned URLs must not be allowed to redirect requests to an
-  // untrusted host or internal address. All configured provider endpoints are
-  // expected to respond directly.
-  const response = await fetch(url, { ...init, redirect: "error" });
-  if (!response.ok) {
-    const detail = (await response.text()).slice(0, 500);
-    throw new Error(`${provider} API request failed (${response.status}): ${detail}`);
+  // untrusted host or internal address. Bound both request duration and the
+  // response body before parsing; upstream error bodies are never surfaced.
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...init,
+      redirect: "error",
+      signal: init.signal ?? AbortSignal.timeout(30_000),
+    });
+  } catch {
+    throw new Error(`${provider} API request failed or timed out.`);
   }
-  return response.json();
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new Error(`${provider} API request failed (${response.status}).`);
+  }
+  try {
+    return await readJsonLimited(response, 1_048_576);
+  } catch {
+    console.error(`${provider} API returned invalid or oversized JSON`);
+    throw new Error(`${provider} API returned an invalid response.`);
+  }
 }
 
 export function registerProviderTools(server: McpServer) {
