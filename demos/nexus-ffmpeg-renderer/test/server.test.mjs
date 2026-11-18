@@ -533,7 +533,7 @@ test("restart recovery removes stale partial private-asset downloads before retr
       }));
 
       const fakeFfmpeg = path.join(workRoot, "fake-ffmpeg");
-      await writeFile(fakeFfmpeg, "#!/usr/bin/env node\\nconst fs = require('node:fs');\\nfs.writeFileSync(process.argv.at(-1), 'fake mp4 output');\\n");
+      await writeFile(fakeFfmpeg, "#!/usr/bin/env node\nconst fs = require('node:fs');\nfs.writeFileSync(process.argv.at(-1), 'fake mp4 output');\n");
       await chmod(fakeFfmpeg, 0o700);
       let assetFetches = 0;
       globalThis.fetch = async (url, init) => {
