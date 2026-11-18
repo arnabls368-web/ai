@@ -38,7 +38,7 @@ export async function createRenderAuthorizationToken({
   if (!ID_PATTERN.test(tenantId) || !ID_PATTERN.test(projectId)) {
     throw new Error("A valid tenant and project identity are required.");
   }
-  if (!["render:submit", "render:read"].includes(scope)) {
+  if (!["render:submit", "render:read", "asset:write"].includes(scope)) {
     throw new Error("Unsupported renderer authorization scope.");
   }
   if (!Number.isInteger(ttlSeconds) || ttlSeconds < 1 || ttlSeconds > MAX_RENDER_TOKEN_TTL_SECONDS) {
