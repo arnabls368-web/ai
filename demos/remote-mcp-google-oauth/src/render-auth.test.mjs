@@ -39,3 +39,30 @@ test("private renderer forwards a readable asset stream without buffering it", a
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("private renderer rejects request bodies that do not match method and scope", async () => {
+  const body = new ReadableStream({ start(controller) { controller.close(); } });
+  const base = {
+    baseUrl: "https://renderer.example",
+    secret,
+    tenantId: "tenant",
+    projectId: "project",
+  };
+  await assert.rejects(
+    callPrivateRenderer({ ...base, scope: "render:read", path: "/auth-check", method: "GET", rawBody: body }),
+    /method or body does not match/,
+  );
+  await assert.rejects(
+    callPrivateRenderer({ ...base, scope: "render:submit", path: "/jobs", method: "POST", rawBody: body }),
+    /method or body does not match/,
+  );
+  await assert.rejects(
+    callPrivateRenderer({ ...base, scope: "asset:write", path: "/assets/scene-1", method: "PUT", body: {} }),
+    /method or body does not match/,
+  );
+  await assert.rejects(
+    callPrivateRenderer({ ...base, scope: "render:submit", path: "/jobs", method: "POST" }),
+    /method or body does not match/,
+  );
+});
