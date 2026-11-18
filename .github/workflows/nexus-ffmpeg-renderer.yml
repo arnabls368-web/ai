@@ -36,3 +36,17 @@ jobs:
             ffmpeg -hide_banner -loglevel error -f lavfi -i color=c=black:s=320x180:d=1 -frames:v 24 -c:v libx264 -pix_fmt yuv420p -movflags +faststart -y /tmp/nexus-smoke.mp4
             ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height -of csv=s=x:p=0 /tmp/nexus-smoke.mp4
           '
+      - name: Verify non-root startup with a writable volume
+        run: |
+          docker run --rm --tmpfs /work:uid=1000,gid=1000 nexus-ffmpeg-renderer sh -ec '
+            test "$(id -u)" -ne 0
+            touch /work/non-root-startup-check /assets/non-root-startup-check
+          '
+      - name: Verify Railway root-owned volume initialization drops privileges
+        run: |
+          docker run --rm --user 0:0 --tmpfs /work nexus-ffmpeg-renderer sh -ec '
+            test "$(id -u)" -ne 0
+            test -w /work
+            test -w /assets
+            touch /work/railway-volume-startup-check /assets/railway-volume-startup-check
+          '
