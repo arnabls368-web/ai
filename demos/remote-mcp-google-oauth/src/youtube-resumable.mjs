@@ -4,7 +4,7 @@ export function nextUploadOffset(rangeHeader, totalBytes) {
     throw new Error("A positive, safe upload size is required.");
   }
   if (rangeHeader === null || rangeHeader === "") return 0;
-  const match = /^bytes=0-(\\d+)$/.exec(rangeHeader.trim());
+  const match = /^bytes=0-(\d+)$/.exec(rangeHeader.trim());
   if (!match) throw new Error("YouTube returned an invalid resumable-upload range.");
   const lastByte = Number(match[1]);
   if (!Number.isSafeInteger(lastByte) || lastByte < 0 || lastByte >= totalBytes) {
