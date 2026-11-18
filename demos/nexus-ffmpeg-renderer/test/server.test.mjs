@@ -432,9 +432,26 @@ test("live submissions cannot exceed the bounded queue capacity", async () => {
       assert.equal(second.status, 202);
       const third = await submit();
       assert.equal(third.status, 202);
+      const accepted = await Promise.all([first, second, third].map((response) => response.json()));
       const fourth = await submit();
       assert.equal(fourth.status, 429);
       assert.match((await fourth.json()).error, /queue is full/i);
+
+      // Do not remove the temporary work root while accepted FFmpeg jobs are
+      // still writing their outputs; otherwise cleanup races the render worker.
+      for (const { id } of accepted) {
+        let job;
+        for (let attempt = 0; attempt < 500; attempt += 1) {
+          const status = await fetch(`${instance.base}/jobs/${id}`, {
+            headers: { authorization: `Bearer ${TOKEN}` },
+          });
+          assert.equal(status.status, 200);
+          job = await status.json();
+          if (job.status === "succeeded" || job.status === "failed") break;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        assert.equal(job.status, "succeeded");
+      }
     } finally {
       await instance.close();
     }
