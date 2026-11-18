@@ -106,6 +106,7 @@ export async function fetchUpstreamAuthToken({
   }
   if (!resp.ok) {
     console.error("Google token exchange failed:", resp.status);
+    await resp.body?.cancel();
     return [null, new Response("Failed to fetch access token", { status: 500 })];
   }
 
