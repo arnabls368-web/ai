@@ -5,6 +5,7 @@ import { getMcpAuthContext } from "agents/mcp/server";
 import { readJsonLimited } from "./utils";
 import { isFalGenerationFailed } from "./fal-status.mjs";
 import { requestHumanApproval } from "./human-approval.mjs";
+import { serializeApprovalBinding } from "./approval-binding.mjs";
 
 type RuntimeEnv = Record<string, unknown>;
 
@@ -152,7 +153,7 @@ export function registerProviderTools(server: McpServer) {
         }
         const approvalDigest = await crypto.subtle.digest(
           "SHA-256",
-          new TextEncoder().encode(JSON.stringify([account, endpointId, inputJson])),
+          new TextEncoder().encode(serializeApprovalBinding([account, endpointId, inputJson])),
         );
         const approvalKey = "fal-generation-" + Array.from(new Uint8Array(approvalDigest), (value) => value.toString(16).padStart(2, "0")).join("");
         const approval = requestHumanApproval(
