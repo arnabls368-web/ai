@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile, symlink, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, symlink, rm, chmod } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { buildFfmpegArgs, validateManifest } from "../src/renderer.mjs";
+import { buildFfmpegArgs, renderManifest, validateManifest } from "../src/renderer.mjs";
 
 function sampleManifest() {
   return {
@@ -82,5 +82,29 @@ test("rejects asset symlinks that escape the asset directory", async () => {
   } finally {
     await rm(root, { recursive: true, force: true });
     await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("kills FFmpeg when a render exceeds its timeout", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "nexus-render-timeout-"));
+  try {
+    const fakeFfmpeg = path.join(root, "fake-ffmpeg");
+    await writeFile(fakeFfmpeg, "#!/usr/bin/env node\\nsetTimeout(() => {}, 5000);\\n");
+    await chmod(fakeFfmpeg, 0o700);
+    await writeFile(path.join(root, "one.jpg"), "image");
+    await writeFile(path.join(root, "two.mp4"), "video");
+    await assert.rejects(
+      renderManifest({
+        manifest: sampleManifest(),
+        assetMap: { a: "one.jpg", b: "two.mp4" },
+        assetRoot: root,
+        outputPath: path.join(root, "out.mp4"),
+        ffmpegPath: fakeFfmpeg,
+        timeoutMs: 50,
+      }),
+      /exceeded the 50ms render timeout/
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });
