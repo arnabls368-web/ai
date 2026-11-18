@@ -26,6 +26,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Install renderer runtime dependencies
+        run: npm install --omit=dev --no-package-lock --prefix demos/nexus-ffmpeg-renderer
       - name: Run renderer unit tests
         run: node --test demos/nexus-ffmpeg-renderer/test/*.test.mjs
       - name: Build renderer container
