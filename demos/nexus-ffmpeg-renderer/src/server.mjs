@@ -204,6 +204,9 @@ export function createRenderJobServer({
       let renderAssetMap = job.assetMap;
       if (process.env.AWS_S3_BUCKET_NAME && job.tenantId && job.projectId) {
         const temporaryAssetRoot = path.join(assetRoot, job.id);
+        // A process crash can leave partial downloads here. Remove them before
+        // restoring the job so exclusive writes can safely fetch every asset again.
+        await rm(temporaryAssetRoot, { recursive: true, force: true });
         await mkdir(temporaryAssetRoot, { recursive: true, mode: 0o700 });
         renderAssetRoot = temporaryAssetRoot;
         renderAssetMap = {};
