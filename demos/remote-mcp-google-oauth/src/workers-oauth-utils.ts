@@ -244,24 +244,32 @@ export function validateCSRFToken(formData: FormData, request: Request): Validat
 }
 
 /**
- * Creates and stores OAuth state information, returning a state token
- * @param oauthReqInfo - OAuth request information to store with the state
- * @param kv - Cloudflare KV namespace for storing OAuth state data
- * @param stateTTL - Time-to-live for OAuth state in seconds (defaults to 600)
- * @returns Object containing the state token (KV-only validation, no cookie needed)
+ * Creates OAuth state in a per-token Durable Object. The object is responsible
+ * for atomic, single-use consumption and automatic expiry cleanup.
  */
 export async function createOAuthState(
 	oauthReqInfo: AuthRequest,
-	kv: KVNamespace,
+	stateStore: DurableObjectNamespace,
 	stateTTL = 600,
 ): Promise<OAuthStateResult> {
+	if (!Number.isInteger(stateTTL) || stateTTL < 1 || stateTTL > 600) {
+		throw new Error("OAuth state TTL must be between 1 and 600 seconds.");
+	}
 	const stateToken = crypto.randomUUID();
-
-	// Store state in KV (secure, one-time use, with TTL)
-	await kv.put(`oauth:state:${stateToken}`, JSON.stringify(oauthReqInfo), {
-		expirationTtl: stateTTL,
+	const stub = stateStore.get(stateStore.idFromName(stateToken));
+	const response = await stub.fetch("https://oauth-state/store", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({
+			value: JSON.stringify(oauthReqInfo),
+			expiresAt: Date.now() + stateTTL * 1000,
+		}),
 	});
-
+	if (!response.ok) {
+		await response.body?.cancel();
+		throw new Error("Could not securely store OAuth state.");
+	}
+	await response.body?.cancel();
 	return { stateToken };
 }
 
@@ -296,81 +304,58 @@ export async function bindStateToSession(stateToken: string): Promise<BindStateR
 }
 
 /**
- * Validates OAuth state from the request, ensuring:
- * 1. The state parameter exists in KV (proves it was created by our server)
- * 2. The state hash matches the session cookie (proves this browser consented to it)
- *
- * This prevents attacks where an attacker's valid state token is injected into
- * a victim's OAuth flow.
- *
- * @param request - The HTTP request containing state parameter and cookies
- * @param kv - Cloudflare KV namespace for storing OAuth state data
- * @returns Object containing the original OAuth request info and cookie to clear
- * @throws {OAuthError} If state is missing, mismatched, or expired
+ * Validates the browser binding, then atomically consumes state in its
+ * per-token Durable Object. A concurrent callback can receive the state once.
  */
 export async function validateOAuthState(
 	request: Request,
-	kv: KVNamespace,
+	stateStore: DurableObjectNamespace,
 ): Promise<ValidateStateResult> {
 	const consentedStateCookieName = "__Host-CONSENTED_STATE";
-	const url = new URL(request.url);
-	const stateFromQuery = url.searchParams.get("state");
-
-	if (!stateFromQuery) {
-		throw new OAuthError("invalid_request", "Missing state parameter", 400);
+	const stateFromQuery = new URL(request.url).searchParams.get("state");
+	if (!stateFromQuery || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(stateFromQuery)) {
+		throw new OAuthError("invalid_request", "Missing or invalid state parameter", 400);
 	}
 
-	// Validate state exists in KV (secure, one-time use, with TTL)
-	const storedDataJson = await kv.get(`oauth:state:${stateFromQuery}`);
-	if (!storedDataJson) {
-		throw new OAuthError("invalid_request", "Invalid or expired state", 400);
-	}
-
-	// SECURITY FIX: Validate that this state token belongs to this browser session
-	// by checking that the state hash matches the session cookie
 	const cookieHeader = request.headers.get("Cookie") || "";
-	const cookies = cookieHeader.split(";").map((c) => c.trim());
-	const consentedStateCookie = cookies.find((c) => c.startsWith(`${consentedStateCookieName}=`));
+	const cookies = cookieHeader.split(";").map((cookie) => cookie.trim());
+	const consentedStateCookie = cookies.find((cookie) => cookie.startsWith(`${consentedStateCookieName}=`));
 	const consentedStateHash = consentedStateCookie
 		? consentedStateCookie.substring(consentedStateCookieName.length + 1)
 		: null;
-
 	if (!consentedStateHash) {
-		throw new OAuthError(
-			"invalid_request",
-			"Missing session binding cookie - authorization flow must be restarted",
-			400,
-		);
+		throw new OAuthError("invalid_request", "Missing session binding cookie - authorization flow must be restarted", 400);
 	}
 
-	// Hash the state from query and compare with cookie
-	const encoder = new TextEncoder();
-	const data = encoder.encode(stateFromQuery);
-	const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-	const hashArray = Array.from(new Uint8Array(hashBuffer));
-	const stateHash = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
-
-	if (stateHash !== consentedStateHash) {
-		throw new OAuthError(
-			"invalid_request",
-			"State token does not match session - possible CSRF attack detected",
-			400,
-		);
+	const hashBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(stateFromQuery));
+	const stateHash = Array.from(new Uint8Array(hashBuffer), (byte) => byte.toString(16).padStart(2, "0")).join("");
+	if (!/^[0-9a-f]{64}$/i.test(consentedStateHash) || stateHash !== consentedStateHash) {
+		throw new OAuthError("invalid_request", "State token does not match session - possible CSRF attack detected", 400);
 	}
 
+	const stub = stateStore.get(stateStore.idFromName(stateFromQuery));
+	const response = await stub.fetch("https://oauth-state/consume", { method: "POST" });
+	if (!response.ok) {
+		await response.body?.cancel();
+		throw new OAuthError("invalid_request", "Invalid or expired state", 400);
+	}
+	let storedData: { value?: unknown };
+	try {
+		storedData = await response.json() as { value?: unknown };
+	} catch {
+		throw new OAuthError("server_error", "Invalid state data", 500);
+	}
+	if (typeof storedData.value !== "string") {
+		throw new OAuthError("server_error", "Invalid state data", 500);
+	}
 	let oauthReqInfo: AuthRequest;
 	try {
-		oauthReqInfo = JSON.parse(storedDataJson) as AuthRequest;
-	} catch (_e) {
+		oauthReqInfo = JSON.parse(storedData.value) as AuthRequest;
+	} catch {
 		throw new OAuthError("server_error", "Invalid state data", 500);
 	}
 
-	// Delete state from KV (one-time use)
-	await kv.delete(`oauth:state:${stateFromQuery}`);
-
-	// Clear the session binding cookie (one-time use per OAuth flow)
 	const clearCookie = `${consentedStateCookieName}=; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=0`;
-
 	return { oauthReqInfo, clearCookie };
 }
 
