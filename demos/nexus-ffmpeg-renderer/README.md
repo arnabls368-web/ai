@@ -107,6 +107,26 @@ The deployed Worker integration uses `NEXUS_RENDERER_URL` and `NEXUS_RENDER_SIGN
 
 **Important limits:** this remains a single-process render queue and must stay at one replica. It has no distributed queue, idempotency keys, cancellation, authenticated callbacks, or multi-replica coordination. The Railway service has public HTTPS ingress protected by short-lived HMAC credentials; this is not private-network-only ingress. S3-compatible storage is configured, but provider-level upload/download interoperability still needs a real integration test. The Worker currently buffers transferred assets (up to 100 MiB) and completed videos (up to 50 MiB); optimize memory use before increasing these limits. Temporary YouTube upload sources now use the isolated `staged-assets/` object prefix; permanent project assets remain under `assets/`. Railway Buckets currently do not support bucket lifecycle configuration, so a prefix-based expiry rule cannot be configured there. The renderer now includes a signed S3 ListObjectsV2 cleanup sweep that deletes only video objects under `staged-assets/` older than 24 hours; it is bounded to 1,000 deletions and 100 listing pages per run. Enable it with `NEXUS_STAGED_ASSET_CLEANUP_ENABLED=true`; it runs at startup and every six hours by default. This flag is not yet enabled in the live Railway service. Do not apply bucket-wide expiry because it could delete permanent assets. End-to-end render-to-YouTube testing remains outstanding.
 
+## Opt-in S3-compatible integration test
+
+The normal renderer test suite uses mocked storage and never writes to a provider. A separate integration test is included for a dedicated test/sandbox bucket only. It performs one uniquely named staged-video PUT, a bounded byte-range GET, a cross-tenant read-denial check, and deletion of that exact object.
+
+Run it only with dedicated non-production credentials and an isolated test bucket:
+
+```bash
+AWS_ENDPOINT_URL="https://<test-storage-endpoint>" \
+AWS_S3_BUCKET_NAME="<dedicated-test-bucket>" \
+AWS_ACCESS_KEY_ID="<test-access-key>" \
+AWS_SECRET_ACCESS_KEY="<test-secret-key>" \
+AWS_DEFAULT_REGION="<provider-region>" \
+AWS_S3_URL_STYLE="virtual-host" \
+NEXUS_STORAGE_INTEGRATION=true \
+NEXUS_STORAGE_INTEGRATION_BUCKET_CONFIRM="<dedicated-test-bucket>" \
+node --test test/storage.integration.test.mjs
+```
+
+The test refuses to run unless the opt-in flag is true, the confirmation value exactly matches the configured bucket, and the bucket name contains `test`, `sandbox`, or `integration`. It creates a random tenant/project/object key and deletes only that exact object, including best-effort cleanup after a failed assertion. Do not use production credentials or a bucket containing real assets. The test validates the provider's actual SigV4, range-response and object-isolation behavior; mocked unit tests alone cannot establish those properties.
+
 ## Deliberate boundaries
 
 The CLI is the rendering engine. The authenticated HTTP service is an early persistent single-process job API. The Cloudflare Worker handles asset intake, private object storage, render orchestration and the authenticated output-to-YouTube handoff. YouTube upload remains a separate, approval-gated action and always sets visibility to private.
