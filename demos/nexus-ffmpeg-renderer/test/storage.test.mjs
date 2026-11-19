@@ -331,7 +331,7 @@ test("streams a signed bounded byte range from private video storage", async () 
     const { getPrivateAssetRange } = await import("../src/storage.mjs");
     const range = await getPrivateAssetRange({
       tenantId: "tenant-range", projectId: "project-range",
-      assetId: "video-1", extension: ".mp4", start: 3, end: 5,
+      assetId: "video-1", extension: ".mp4", start: 3, end: 5, prefix: "staged-assets",
     });
     assert.equal(captured.init.method, "GET");
     assert.equal(captured.init.headers.get("range"), "bytes=3-5");
@@ -396,11 +396,11 @@ test("deletes only the scoped private staged object using a signed S3 request", 
     const { deletePrivateAsset } = await import("../src/storage.mjs");
     const result = await deletePrivateAsset({
       tenantId: "tenant-delete", projectId: "project-delete",
-      assetId: "asset-delete", extension: ".mp4",
+      assetId: "asset-delete", extension: ".mp4", prefix: "staged-assets",
     });
     assert.deepEqual(result, { deleted: true });
     assert.equal(captured.init.method, "DELETE");
-    assert.match(captured.url, /assets\/tenant-delete\/project-delete\//);
+    assert.match(captured.url, /staged-assets\/tenant-delete\/project-delete\//);
     assert.match(captured.init.headers.get("authorization"), /^AWS4-HMAC-SHA256/);
   } finally {
     globalThis.fetch = originalFetch;
