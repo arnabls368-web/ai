@@ -45,14 +45,14 @@ jobs:
         if: steps.credentials.outputs.configured == 'true'
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
-      - name: Install locked workspace dependencies
+      - name: Install frozen workspace dependencies
         if: steps.credentials.outputs.configured == 'true'
         working-directory: .
-        run: pnpm install --frozen-lockfile --filter remote-mcp-google-oauth...
+        run: pnpm install --frozen-lockfile --child-concurrency=10
 
       - name: Deploy Worker with the lockfile-pinned Wrangler
         if: steps.credentials.outputs.configured == 'true'
@@ -60,7 +60,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: 0f115e51541a996bc777725456d89e11
-        run: pnpm --filter remote-mcp-google-oauth exec wrangler deploy
+        run: pnpm exec wrangler deploy
 
       - name: Report missing deployment credential
         if: steps.credentials.outputs.configured != 'true'
