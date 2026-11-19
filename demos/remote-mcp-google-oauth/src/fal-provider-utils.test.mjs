@@ -54,7 +54,7 @@ test("validates persisted fal.ai job records and normalizes trusted queue URLs",
   }, "4d1f2c8e-0d7b-4d6e-9a2a-1f8e2f2d6a01");
   assert.equal(record.endpointId, "fal-ai/example-model");
   assert.equal(record.statusUrl, "https://queue.fal.run/fal-ai/example-model/requests/4d1f2c8e-0d7b-4d6e-9a2a-1f8e2f2d6a01/status");
-  assert.equal(record.responseUrl, "https://queue.fal.run/fal-ai/example-model/requests/abc");
+  assert.equal(record.responseUrl, "https://queue.fal.run/fal-ai/example-model/requests/4d1f2c8e-0d7b-4d6e-9a2a-1f8e2f2d6a01");
   assert.equal(record.cancelUrl, "https://queue.fal.run/fal-ai/example-model/requests/4d1f2c8e-0d7b-4d6e-9a2a-1f8e2f2d6a01/cancel");
 });
 
@@ -84,7 +84,7 @@ test("rejects missing, mismatched, malformed, or untrusted persisted job records
   ]) {
     assert.throws(
       () => validateFalJobRecord(record, valid.requestId),
-      /invalid|unexpected queue URL/,
+      /invalid|unexpected queue URL|does not match its endpoint/,
     );
   }
 });
