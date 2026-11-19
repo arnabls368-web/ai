@@ -729,8 +729,11 @@ test("job status survives a render-service restart", async () => {
       await first.close();
     }
 
+    const orphanedTemp = path.join(workRoot, jobId, "job.12345678-1234-4234-8234-123456789abc.tmp");
+    await writeFile(orphanedTemp, "interrupted atomic write");
     const restarted = await startServer(workRoot);
     try {
+      assert.equal((await readdir(path.join(workRoot, jobId))).includes(path.basename(orphanedTemp)), false);
       const response = await fetch(`${restarted.base}/jobs/${jobId}`, {
         headers: { authorization: `Bearer ${TOKEN}` },
       });
