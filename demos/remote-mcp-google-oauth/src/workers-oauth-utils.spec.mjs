@@ -75,7 +75,7 @@ test("approval dialog safely escapes client metadata and blocks unsafe links", a
   assert.doesNotMatch(html, /data:text\/html/);
   assert.match(html, /https:\/\/client\.example\/privacy\?x=1&amp;y=2/);
   assert.match(html, /https:\/\/client\.example\/callback/);
-  assert.match(html, /name="state" value="&quot; onfocus=&quot;alert\\(1\\)"/);
-  assert.match(html, /name="csrf_token" value="&quot; autofocus onfocus=&quot;alert\\(2\\)"/);
+  assert.match(html, /name="state" value="&quot; onfocus=&quot;alert\(1\)"/);
+  assert.match(html, /name="csrf_token" value="&quot; autofocus onfocus=&quot;alert\(2\)"/);
   assert.doesNotMatch(html, /value="[^"]*" onfocus=/);
 });
