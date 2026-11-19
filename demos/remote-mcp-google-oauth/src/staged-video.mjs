@@ -23,16 +23,31 @@ export async function stageVideoSource({ source, mimeType, callRenderer, assetId
     await source.body.cancel();
     throw new Error("The video source must be MP4, MOV, WebM, or Matroska.");
   }
-  const response = await callRenderer({
-    method: "PUT",
-    scope: "asset:write",
-    path: "/assets/" + assetId,
-    rawBody: source.body,
-    contentType: mimeType,
-  });
+  const expectedExtension = MIME_EXTENSIONS.get(mimeType);
+  const cleanupPartialAsset = async () => {
+    try {
+      await deleteStagedVideoAsset({ assetId, extension: expectedExtension, callRenderer });
+    } catch {
+      // Best effort only; object-store lifecycle expiry remains the crash-safety backstop.
+    }
+  };
+  let response;
+  try {
+    response = await callRenderer({
+      method: "PUT",
+      scope: "asset:write",
+      path: "/assets/" + assetId,
+      rawBody: source.body,
+      contentType: mimeType,
+    });
+  } catch (error) {
+    await cleanupPartialAsset();
+    throw error;
+  }
   if (!response.ok) {
     const status = response.status;
     await response.body?.cancel();
+    await cleanupPartialAsset();
     throw new Error("Private renderer could not stage the video (HTTP " + status + ").");
   }
   let record;
@@ -63,15 +78,16 @@ export async function stageVideoSource({ source, mimeType, callRenderer, assetId
     }
     record = JSON.parse(new TextDecoder().decode(bytes));
   } catch {
+    await cleanupPartialAsset();
     throw new Error("Private renderer returned invalid staging metadata.");
   }
-  const expectedExtension = MIME_EXTENSIONS.get(mimeType);
   if (!record || record.assetId !== assetId ||
       record.filename !== assetId + "." + expectedExtension ||
       record.storage !== "private_object_storage" ||
       !Number.isSafeInteger(record.bytes) || record.bytes < 1 ||
       record.bytes > MAX_STAGED_VIDEO_BYTES ||
       typeof record.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(record.sha256)) {
+    await cleanupPartialAsset();
     throw new Error("Private renderer returned invalid staged video metadata.");
   }
   const extension = expectedExtension;
