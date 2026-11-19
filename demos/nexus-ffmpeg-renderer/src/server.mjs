@@ -81,6 +81,7 @@ function publicJob(job) {
   delete result.outputPath;
   delete result.tenantId;
   delete result.projectId;
+  delete result.idempotencyKey;
   return {
     ...result,
     ...(job.status === "succeeded" ? { outputUrl: `/jobs/${job.id}/output` } : {}),
