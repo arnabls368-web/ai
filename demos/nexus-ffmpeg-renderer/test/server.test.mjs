@@ -946,7 +946,7 @@ test("signed asset upload rejects an oversized declared body before reading it",
         request.end();
       });
       assert.equal(result.status, 413);
-      assert.deepEqual(JSON.parse(result.body), { error: "Asset exceeds the 100 MiB limit." });
+      assert.deepEqual(JSON.parse(result.body), { error: "Asset exceeds the configured 100 MiB limit." });
     } finally {
       await server.close();
     }
@@ -1110,7 +1110,7 @@ test("staged asset deletion requires asset:delete scope and deletes only the sig
       try {
         const token = signedHeader("tenant-cleanup", "project-cleanup", "asset:delete").authorization;
         const result = await new Promise((resolve, reject) => {
-          const req = httpRequest(instance.base + "/assets/asset-123.mp4", {
+          const req = httpRequest(instance.base + "/assets/asset-123/mp4", {
             method: "DELETE",
             headers: { authorization: token },
           }, (response) => {
