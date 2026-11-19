@@ -221,6 +221,7 @@ export async function uploadResumableVideoFromRanges({
         await uploaded.body?.cancel();
         mustCheckStatus = true;
       } catch (error) {
+        if (error instanceof Error && error.message.startsWith("Staged video range returned")) throw error;
         lastFailure = error instanceof Error ? error : new Error("Video upload connection failed.");
         mustCheckStatus = true;
       }
