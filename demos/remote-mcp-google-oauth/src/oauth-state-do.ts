@@ -39,7 +39,7 @@ export class OAuthStateDO {
         // Do not leave an uncollectable state record if expiry scheduling fails.
         await this.state.storage.transaction(async (transaction) => {
           const current = await transaction.get<StoredOAuthState>("oauth-state");
-          if (current?.value === body.value && current.expiresAt === body.expiresAt) {
+          if (current && current.value === body.value && current.expiresAt === body.expiresAt) {
             await transaction.delete("oauth-state");
           }
         });
