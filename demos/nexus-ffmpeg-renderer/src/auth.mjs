@@ -3,7 +3,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 const AUDIENCE = "nexus-renderer";
 const MAX_TOKEN_TTL_SECONDS = 300;
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
-const SCOPES = ["render:submit", "render:read", "asset:write"];
+const SCOPES = ["render:submit", "render:read", "asset:write", "asset:read"];
 
 function encode(value) {
   return Buffer.from(JSON.stringify(value)).toString("base64url");
