@@ -410,3 +410,75 @@ test("deletes only the scoped private staged object using a signed S3 request", 
     }
   }
 });
+
+
+test("sweeps only expired video objects under the staged-assets prefix", async () => {
+  const keys = ["AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION", "AWS_S3_URL_STYLE"];
+  const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  const originalFetch = globalThis.fetch;
+  const now = Date.parse("2026-11-19T04:00:00.000Z");
+  const deleted = [];
+  let listingUrl;
+  try {
+    process.env.AWS_ENDPOINT_URL = "https://objects.example.test";
+    process.env.AWS_S3_BUCKET_NAME = "nexus-private";
+    process.env.AWS_ACCESS_KEY_ID = "test-access";
+    process.env.AWS_SECRET_ACCESS_KEY = "test-secret";
+    process.env.AWS_DEFAULT_REGION = "auto";
+    process.env.AWS_S3_URL_STYLE = "virtual-host";
+    globalThis.fetch = async (url, init) => {
+      if (init.method === "GET") {
+        listingUrl = String(url);
+        const xml = '<?xml version="1.0"?>' +
+          '<ListBucketResult>' +
+          '<Contents><Key>staged-assets/tenant-a/project-a/old.mp4</Key><LastModified>2026-11-18T00:00:00.000Z</LastModified></Contents>' +
+          '<Contents><Key>staged-assets/tenant-a/project-a/recent.webm</Key><LastModified>2026-11-19T03:30:00.000Z</LastModified></Contents>' +
+          '<Contents><Key>assets/tenant-a/project-a/permanent.mp4</Key><LastModified>2026-11-17T00:00:00.000Z</LastModified></Contents>' +
+          '<Contents><Key>staged-assets/tenant-a/project-a/image.png</Key><LastModified>2026-11-17T00:00:00.000Z</LastModified></Contents>' +
+          '</ListBucketResult>';
+        return new Response(xml);
+      }
+      if (init.method === "DELETE") {
+        deleted.push(String(url));
+        return new Response(null, { status: 204 });
+      }
+      throw new Error("Unexpected storage method");
+    };
+    const { cleanupStagedAssets } = await import("../src/storage.mjs");
+    const result = await cleanupStagedAssets({ olderThanMs: 3 * 60 * 60 * 1000, now });
+    assert.deepEqual(result, { scanned: 4, deleted: 1, pages: 1, truncated: false });
+    assert.equal(new URL(listingUrl).searchParams.get("prefix"), "staged-assets/");
+    assert.equal(new URL(listingUrl).searchParams.get("list-type"), "2");
+    assert.equal(deleted.length, 1);
+    assert.match(deleted[0], /staged-assets\/tenant-a\/project-a\/old\.mp4$/);
+    assert.match(new URL(listingUrl).search, /prefix=staged-assets%2F/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("staged asset cleanup rejects unsafe limits and fails closed on listing errors", async () => {
+  const keys = ["AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"];
+  const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  const originalFetch = globalThis.fetch;
+  try {
+    process.env.AWS_ENDPOINT_URL = "https://objects.example.test";
+    process.env.AWS_S3_BUCKET_NAME = "nexus-private";
+    process.env.AWS_ACCESS_KEY_ID = "test-access";
+    process.env.AWS_SECRET_ACCESS_KEY = "test-secret";
+    const { cleanupStagedAssets } = await import("../src/storage.mjs");
+    await assert.rejects(cleanupStagedAssets({ olderThanMs: 1000 }), /limits are invalid/);
+    globalThis.fetch = async () => new Response("private provider error", { status: 403 });
+    await assert.rejects(cleanupStagedAssets(), /listing failed \(HTTP 403\)/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
