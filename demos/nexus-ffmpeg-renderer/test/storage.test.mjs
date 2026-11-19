@@ -527,3 +527,14 @@ test("paginates staged object listings with safely encoded continuation tokens",
     }
   }
 });
+
+test("rejects private object keys outside the permanent and staging namespaces", async () => {
+  const { deletePrivateAsset } = await import("../src/storage.mjs");
+  await assert.rejects(deletePrivateAsset({
+    tenantId: "tenant-a",
+    projectId: "project-a",
+    assetId: "asset-a",
+    extension: ".mp4",
+    prefix: "assets/../../other",
+  }), /prefix is not allowed/);
+});
