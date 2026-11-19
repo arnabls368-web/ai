@@ -71,6 +71,23 @@ async function providerJson(url: string, init: RequestInit, provider: string): P
   }
 }
 
+
+
+async function estimateFalCost(apiKey: string, endpointId: string, estimateType: "historical_api_price" | "unit_price", quantity: number): Promise<{ estimateType: string; totalCost: number; currency: string }> {
+  const endpointEstimate = estimateType === "historical_api_price" ? { call_quantity: quantity } : { unit_quantity: quantity };
+  const data = await providerJson("https://api.fal.ai/v1/models/pricing/estimate", {
+    method: "POST",
+    headers: { Authorization: `Key ${apiKey}`, Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({ estimate_type: estimateType, endpoints: { [endpointId]: endpointEstimate } }),
+  }, "fal.ai cost estimate");
+  if (!data || data.estimate_type !== estimateType || typeof data.total_cost !== "number" ||
+      !Number.isFinite(data.total_cost) || data.total_cost < 0 ||
+      typeof data.currency !== "string" || !/^[A-Z]{3}$/.test(data.currency)) {
+    throw new Error("fal.ai returned an invalid cost estimate.");
+  }
+  return { estimateType, totalCost: data.total_cost, currency: data.currency };
+}
+
 export function registerProviderTools(server: McpServer) {
   server.registerTool(
     "nexus_search_media_models",
@@ -134,6 +151,36 @@ export function registerProviderTools(server: McpServer) {
       } catch (error) {
         return failure(error);
       }
+    },
+  );
+
+  server.registerTool(
+    "nexus_estimate_media_generation_cost",
+    {
+      description: "Estimate fal.ai cost for one endpoint using historical per-call pricing or a known number of billing units. Read-only; does not submit a generation. Estimates are advisory, not guaranteed charges.",
+      inputSchema: z.object({
+        endpointId: z.string().min(3).max(200).regex(/^[a-z0-9][a-z0-9._-]*(\\/[a-z0-9][a-z0-9._-]*){1,4}$/i),
+        estimateType: z.enum(["historical_api_price", "unit_price"]).default("historical_api_price"),
+        callQuantity: z.number().int().min(1).max(100000).optional(),
+        unitQuantity: z.number().positive().max(100000000).optional(),
+      }),
+    },
+    async ({ endpointId, estimateType, callQuantity, unitQuantity }) => {
+      try {
+        const apiKey = secret("FAL_KEY");
+        if (!apiKey) throw new Error("fal.ai is not configured on this Worker. Add FAL_KEY as a Cloudflare Worker secret.");
+        if (estimateType === "historical_api_price" && (callQuantity === undefined || unitQuantity !== undefined)) throw new Error("historical_api_price requires callQuantity and does not accept unitQuantity.");
+        if (estimateType === "unit_price" && (unitQuantity === undefined || callQuantity !== undefined)) throw new Error("unit_price requires unitQuantity and does not accept callQuantity.");
+        const quantity = estimateType === "historical_api_price" ? callQuantity! : unitQuantity!;
+        const estimate = await estimateFalCost(apiKey, endpointId, estimateType, quantity);
+        return result({
+          endpointId, ...estimate, quantity,
+          note: estimateType === "historical_api_price"
+            ? "Historical per-call estimate based on fal.ai usage patterns; it may not reflect this request's exact settings."
+            : "Unit-price estimate based on the supplied billing-unit quantity. Ensure the quantity matches this model's billing unit.",
+          disclaimer: "Advisory estimate only, not a quote or guaranteed final charge. Model settings, successful output quantity, account discounts and provider pricing changes can affect the actual cost.",
+        });
+      } catch (error) { return failure(error); }
     },
   );
 
@@ -209,27 +256,30 @@ export function registerProviderTools(server: McpServer) {
         if (typeof inputJson !== "string" || inputJson.length > 12_000) {
           throw new Error("Generation input exceeds the 12,000-character approval display limit; reduce it before requesting generation.");
         }
+        const apiKey = secret("FAL_KEY");
+        if (!apiKey) throw new Error("fal.ai is not configured on this Worker. Add FAL_KEY as a Cloudflare Worker secret.");
+        const estimate = await estimateFalCost(apiKey, endpointId, "historical_api_price", 1);
+        const estimateJson = JSON.stringify(estimate);
         const approvalDigest = await crypto.subtle.digest(
           "SHA-256",
-          new TextEncoder().encode(serializeApprovalBinding([account, endpointId, inputJson])),
+          new TextEncoder().encode(serializeApprovalBinding([account, endpointId, inputJson, estimateJson])),
         );
         const approvalKey = "fal-generation-" + Array.from(new Uint8Array(approvalDigest), (value) => value.toString(16).padStart(2, "0")).join("");
         const approval = requestHumanApproval(
           ctx,
           approvalKey,
           "PAID fal.ai generation approval\\n" +
-          "Google account: " + account + "\n" +
-          "Endpoint: " + endpointId + "\n" +
-          "Exact input JSON:\n" + inputJson + "\n" +
-          "This request may incur charges from fal.ai. The exact price depends on the selected endpoint and its billing terms. Confirm only if you approve this exact request.",
+          "Google account: " + account + "\\n" +
+          "Endpoint: " + endpointId + "\\n" +
+          "Historical one-call cost estimate: " + estimate.currency + " " + estimate.totalCost + "\\n" +
+          "Exact input JSON:\\n" + inputJson + "\\n" +
+          "IMPORTANT: This is an advisory historical estimate, not a quote. Actual charges depend on successful output units, model settings, account pricing and current provider rates. If you approve, only this exact endpoint and input will be submitted.",
           humanApprovalApi,
         );
         if (!approval.approved) {
           if ("inputRequired" in approval) return approval.inputRequired;
           return failure("Generation was not approved. No fal.ai job was submitted.");
         }
-        const apiKey = secret("FAL_KEY");
-        if (!apiKey) throw new Error("fal.ai is not configured on this Worker. Add FAL_KEY as a Cloudflare Worker secret.");
         const url = `https://queue.fal.run/${endpointId}`;
         const submitted = await providerJson(url, {
           method: "POST",
