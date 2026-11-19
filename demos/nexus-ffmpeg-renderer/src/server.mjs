@@ -62,7 +62,7 @@ async function writeBinaryLimited(request, filePath, limit = MAX_ASSET_BYTES_LIM
     for await (const chunk of request) {
       size += chunk.length;
       if (size > limit) {
-        throw Object.assign(new Error("Asset exceeds the 100 MiB limit."), { status: 413 });
+        throw Object.assign(new Error("Asset exceeds the configured " + Math.floor(limit / (1024 * 1024)) + " MiB limit."), { status: 413 });
       }
       await handle.writeFile(chunk);
     }
