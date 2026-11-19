@@ -63,6 +63,37 @@ test("rejects oversized, malformed, or mismatched staging metadata", async () =>
   }
 });
 
+test("cleans up a staged object when the renderer returns invalid metadata", async () => {
+  const methods = [];
+  await assert.rejects(stageVideoSource({
+    assetId: "asset-partial",
+    source: new Response(new Uint8Array([1, 2, 3])),
+    mimeType: "video/mp4",
+    callRenderer: async (request) => {
+      methods.push(request.method);
+      if (request.method === "PUT") return Response.json({ assetId: "wrong" }, { status: 201 });
+      return Response.json({ deleted: true });
+    },
+  }), /invalid staged video metadata/);
+  assert.deepEqual(methods, ["PUT", "DELETE"]);
+});
+
+test("attempts cleanup after a staging request returns an error", async () => {
+  const methods = [];
+  await assert.rejects(stageVideoSource({
+    assetId: "asset-failed",
+    source: new Response(new Uint8Array([1, 2, 3])),
+    mimeType: "video/mp4",
+    callRenderer: async (request) => {
+      methods.push(request.method);
+      return request.method === "PUT"
+        ? new Response("storage error", { status: 502 })
+        : Response.json({ deleted: true });
+    },
+  }), /could not stage the video \(HTTP 502\)/);
+  assert.deepEqual(methods, ["PUT", "DELETE"]);
+});
+
 test("range reader requests and validates exact bounded byte ranges", async () => {
   let request;
   const readRange = createStagedVideoRangeReader({
