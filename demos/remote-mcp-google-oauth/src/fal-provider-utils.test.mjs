@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { trustedFalUrl, validateFalJobRecord } from "./fal-provider-utils.mjs";
+import { recoverFalJobRecord, trustedFalUrl, validateFalJobRecord } from "./fal-provider-utils.mjs";
 
 test("accepts HTTPS queue URLs on the two approved fal.ai queue hosts", () => {
   assert.equal(
@@ -97,4 +97,23 @@ test("completion metadata persistence keeps the successful output path non-fatal
 
   const unavailableKv = { put: async () => { throw new Error("KV unavailable"); } };
   assert.deepEqual(await tryPersistFalCompletion(unavailableKv, "job-key", job, "2026-11-19T08:00:00.000Z"), { persisted: false });
+});
+
+test("reconstructs trusted fal queue URLs from a valid endpoint and UUID", () => {
+  const requestId = "019a1b2c-3d4e-7f80-9a1b-2c3d4e5f6a7b";
+  const record = recoverFalJobRecord("blackforestlabs/flux-3-max/text-to-video", requestId);
+  assert.equal(record.statusUrl, `https://queue.fal.run/blackforestlabs/flux-3-max/text-to-video/requests/${requestId}/status`);
+  assert.equal(record.responseUrl, `https://queue.fal.run/blackforestlabs/flux-3-max/text-to-video/requests/${requestId}`);
+  assert.equal(record.cancelUrl, `https://queue.fal.run/blackforestlabs/flux-3-max/text-to-video/requests/${requestId}/cancel`);
+});
+
+test("rejects invalid endpoint IDs and request IDs during fal job recovery", () => {
+  for (const [endpointId, requestId] of [
+    ["https://attacker.example", "019a1b2c-3d4e-7f80-9a1b-2c3d4e5f6a7b"],
+    ["../attacker", "019a1b2c-3d4e-7f80-9a1b-2c3d4e5f6a7b"],
+    ["blackforestlabs/flux-3-max", "not-a-uuid"],
+    ["blackforestlabs/flux-3-max", "019a1b2c-3d4e-7f80-9a1b-2c3d4e5f6a7c"],
+  ]) {
+    assert.throws(() => recoverFalJobRecord(endpointId, requestId), /valid fal.ai endpoint ID and request ID/);
+  }
 });
