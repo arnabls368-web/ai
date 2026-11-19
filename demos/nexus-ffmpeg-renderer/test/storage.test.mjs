@@ -252,3 +252,58 @@ test("private storage rejects non-HTTPS and credential-bearing endpoints", async
     }
   }
 });
+
+test("streams file-backed private assets with a signed content hash and exact length", async () => {
+  const keys = [
+    "AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME", "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION", "AWS_S3_URL_STYLE",
+  ];
+  const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  const originalFetch = globalThis.fetch;
+  const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { createHash } = await import("node:crypto");
+  const directory = await mkdtemp(join(tmpdir(), "nexus-storage-test-"));
+  try {
+    process.env.AWS_ENDPOINT_URL = "https://objects.example.test";
+    process.env.AWS_S3_BUCKET_NAME = "nexus-private";
+    process.env.AWS_ACCESS_KEY_ID = "test-access";
+    process.env.AWS_SECRET_ACCESS_KEY = "test-secret";
+    process.env.AWS_DEFAULT_REGION = "auto";
+    process.env.AWS_S3_URL_STYLE = "virtual-host";
+    const source = Buffer.from("streamed private video asset");
+    const filePath = join(directory, "asset.mp4");
+    await writeFile(filePath, source, { mode: 0o600 });
+    let captured;
+    globalThis.fetch = async (url, init) => {
+      const chunks = [];
+      for await (const chunk of init.body) chunks.push(Buffer.from(chunk));
+      captured = { url: String(url), init, body: Buffer.concat(chunks) };
+      return new Response(null, { status: 200 });
+    };
+    const { putPrivateAssetFile } = await import("../src/storage.mjs");
+    const result = await putPrivateAssetFile({
+      tenantId: "tenant-stream", projectId: "project-stream",
+      assetId: "asset-stream", mimeType: "video/mp4", filePath,
+    });
+    assert.equal(result.bytes, source.length);
+    assert.equal(result.extension, ".mp4");
+    assert.deepEqual(captured.body, source);
+    assert.equal(captured.init.method, "PUT");
+    assert.equal(captured.init.duplex, "half");
+    assert.equal(captured.init.headers.get("content-length"), String(source.length));
+    assert.equal(
+      captured.init.headers.get("x-amz-content-sha256"),
+      createHash("sha256").update(source).digest("hex"),
+    );
+    assert.match(captured.url, /^https:\/\/nexus-private\.objects\.example\.test\/assets\/tenant-stream\/project-stream\//);
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    await rm(directory, { recursive: true, force: true });
+  }
+});
