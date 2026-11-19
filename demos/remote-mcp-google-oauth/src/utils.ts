@@ -100,8 +100,20 @@ export async function fetchUpstreamAuthToken({
       redirect: "error",
       signal: AbortSignal.timeout(20_000),
     });
-  } catch {
-    console.error("Google token exchange request failed or timed out");
+  } catch (error) {
+    // Log only transport error metadata. Never log the authorization code,
+    // client secret, request body, access token, or full request URL.
+    const primary = error instanceof Error ? error : undefined;
+    const cause = primary?.cause instanceof Error ? primary.cause : undefined;
+    const safeText = (value: string | undefined) =>
+      value ? value.replace(/https?:\/\/[^\s]+/gi, "[url]").slice(0, 180) : undefined;
+    console.error("Google token exchange transport failure", {
+      errorName: primary?.name ?? "UnknownError",
+      errorMessage: safeText(primary?.message),
+      causeName: cause?.name,
+      causeMessage: safeText(cause?.message),
+      timedOut: primary?.name === "TimeoutError" || cause?.name === "TimeoutError",
+    });
     return [null, new Response("Google token exchange request failed", { status: 502 })];
   }
   if (!resp.ok) {
