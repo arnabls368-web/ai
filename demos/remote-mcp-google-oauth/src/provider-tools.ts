@@ -319,14 +319,14 @@ export function registerProviderTools(server: McpServer) {
           ...(typeof submitted.cancel_url === "string" ? { cancelUrl: trustedFalUrl(submitted.cancel_url) } : {}),
           createdAt: new Date().toISOString(),
         };
-        const recoveryExpiresAt = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 7;
-        const recoveryToken = await createFalRecoveryToken(apiKey, scope, endpointId, submitted.request_id, recoveryExpiresAt);
         let trackingSaved = true;
         try {
           await env.OAUTH_KV.put(`nexus:fal-jobs:v1:${scope}:${submitted.request_id}`, JSON.stringify(record), { expirationTtl: 60 * 60 * 24 * 7 });
         } catch {
           trackingSaved = false;
         }
+        const recoveryExpiresAt = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 7;
+        const recoveryToken = await createFalRecoveryToken(apiKey, scope, endpointId, submitted.request_id, recoveryExpiresAt);
         return result({
           status: submitted.status ?? "IN_QUEUE",
           endpointId,
