@@ -121,6 +121,9 @@ export function createRenderJobServer({
   }
 
   const jobs = new Map();
+  // In-flight persistence reservations ensure duplicate submissions wait for
+  // the first durable write instead of receiving a receipt for an uncommitted job.
+  const idempotencyReservations = new Map();
   const queue = [];
   let active = 0;
   let pendingSubmissions = 0;
@@ -487,6 +490,21 @@ export function createRenderJobServer({
           } catch (error) {
             return json(response, 400, { error: String(error?.message ?? error).slice(0, 500) });
           }
+          const reservationKey = body.idempotencyKey
+            ? JSON.stringify([claims.tenantId, claims.projectId, body.idempotencyKey])
+            : null;
+          if (reservationKey && idempotencyReservations.has(reservationKey)) {
+            const pending = await idempotencyReservations.get(reservationKey);
+            if (!pending.ok) {
+              return json(response, 503, { error: "matching render submission could not be persisted" });
+            }
+            return json(response, 202, {
+              id: pending.job.id,
+              status: pending.job.status,
+              statusUrl: `/jobs/${pending.job.id}`,
+              deduplicated: true,
+            });
+          }
           const idempotencyMatch = body.idempotencyKey
             ? [...jobs.values()].find((candidate) =>
                 candidate.idempotencyKey === body.idempotencyKey &&
@@ -512,17 +530,22 @@ export function createRenderJobServer({
             assetMap: body.assetMap,
             ...(body.idempotencyKey ? { idempotencyKey: body.idempotencyKey } : {}),
           };
-          // Publish the in-memory reservation before the first await. A
-          // concurrent request with the same scoped key will find this job
-          // while its durable record is being written and will not enqueue a
-          // second render.
+          // Reserve the scoped key synchronously. The promise always resolves
+          // to a result object so a failed write cannot create an unhandled
+          // rejection when no duplicate request is waiting.
           jobs.set(id, job);
-          try {
-            await persistJob(job);
-          } catch (error) {
+          const persistence = persistJob(job).then(
+            () => ({ ok: true, job }),
+            (error) => ({ ok: false, error }),
+          );
+          if (reservationKey) idempotencyReservations.set(reservationKey, persistence);
+          const persisted = await persistence;
+          if (!persisted.ok) {
             jobs.delete(id);
-            throw error;
+            if (reservationKey) idempotencyReservations.delete(reservationKey);
+            throw persisted.error;
           }
+          if (reservationKey) idempotencyReservations.delete(reservationKey);
           queue.push(job);
           enqueued = true;
           pendingSubmissions -= 1;
