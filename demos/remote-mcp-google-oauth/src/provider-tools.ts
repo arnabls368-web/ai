@@ -4,6 +4,7 @@ import { env } from "cloudflare:workers";
 import { getMcpAuthContext } from "agents/mcp/server";
 import { readJsonLimited } from "./utils";
 import { isFalGenerationFailed } from "./fal-status.mjs";
+import { trustedFalUrl } from "./fal-provider-utils.mjs";
 import { requestHumanApproval } from "./human-approval.mjs";
 import { serializeApprovalBinding } from "./approval-binding.mjs";
 
@@ -42,15 +43,6 @@ const humanApprovalApi = {
     required: ["confirm"],
   },
 };
-
-function trustedFalUrl(value: string): string {
-  const url = new URL(value);
-  if (url.protocol !== "https:" || !["queue.fal.run", "queue.falrun.com"].includes(url.hostname) ||
-      url.username || url.password || url.port || url.search || url.hash) {
-    throw new Error("fal.ai returned an unexpected queue URL; refusing to fetch it.");
-  }
-  return url.toString();
-}
 
 async function providerJson(url: string, init: RequestInit, provider: string): Promise<any> {
   // Provider-returned URLs must not be allowed to redirect requests to an
