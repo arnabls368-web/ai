@@ -104,7 +104,7 @@ test("uploads staged videos as aligned bounded byte ranges", async () => {
   assert.equal(calls[0].headers.get("Content-Range"), `bytes 0-262143/${totalBytes}`);
   assert.equal(calls[1].headers.get("Content-Range"), `bytes 262144-${totalBytes - 1}/${totalBytes}`);
   assert.equal(calls[0].body.byteLength, 256 * 1024);
-  assert.equal(calls[1].body.byteLength, 38 * 1024);
+  assert.equal(calls[1].body.byteLength, totalBytes - 256 * 1024);
 });
 
 test("re-reads staged ranges after interrupted chunk uploads and status checks", async () => {
