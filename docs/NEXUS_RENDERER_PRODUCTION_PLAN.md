@@ -4,8 +4,8 @@ Status: partially implemented and deployed; production end-to-end verification i
 
 ## Current rollout checkpoint (2026-11-19)
 
-- Latest reviewed feature-branch head: `0ffe4ecd0967f1248e6e2d10290c8262df7d08cb`.
-- All workflows for this head completed successfully, except the prerelease workflow which was correctly skipped: main CI, Semgrep OSS scan, NEXUS FFmpeg renderer, YouTube MCP type check, and deployment-bundle build.
+- Latest reviewed feature-branch head: `9146ee3c1f7685748554290756b231ce5a584874`.
+- All required checks for this head completed successfully: main CI, Semgrep OSS scan, NEXUS FFmpeg renderer, YouTube MCP type check, upload-source tests, and deployment-bundle build. The duplicate build check was skipped.
 - The renderer workflow passed unit tests, container build, a real FFmpeg encode smoke test, non-root startup, and persistent-volume checks. These are CI/container validations; they do not prove the currently deployed Railway service has been switched to the repository Dockerfile.
 - The live Railway renderer is still configured to use Railpack, with one replica and the persistent volume mounted at `/work`. The Dockerfile's `RAILWAY_RUN_UID=0` entrypoint path is not a current live-service prerequisite unless an operator deliberately changes the builder to Dockerfile and approves that rollout.
 - The Cloudflare Worker remains on its existing production version. Its live configuration still lacks the `OAUTH_STATE` Durable Object binding/migration required by the current OAuth state implementation. Do not treat the new OAuth state flow as production-ready until the migration and binding are deployed and verified.
@@ -40,7 +40,7 @@ Status: partially implemented and deployed; production end-to-end verification i
 - Renderer storage code signs S3-compatible PUT and GET requests and uses tenant/project-scoped object keys.
 - Automated storage tests verify signing, virtual-host addressing, and PUT/GET round trips against a mocked storage endpoint.
 - Renderer tests cover manifest validation, signed authorization, job ownership, bounded queue recovery, symlink defenses, and owner-only local file permissions.
-- Latest CI on `0ffe4ecd0967f1248e6e2d10290c8262df7d08cb` passed main CI, the renderer Docker/FFmpeg/non-root/volume checks, YouTube MCP type checks, deployment-bundle build, and Semgrep OSS scan.
+- Latest CI on `9146ee3c1f7685748554290756b231ce5a584874` passed main CI, renderer checks, YouTube MCP type checks, upload-source tests, deployment-bundle build, and Semgrep OSS scan.
 - The latest Semgrep workflow completed successfully. A successful scan does not replace live-provider verification.
 - The deployed renderer health endpoint has returned HTTP 200, and the latest deployment started successfully.
 
