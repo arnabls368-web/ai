@@ -152,6 +152,55 @@ test("Durable Object storage transaction enforces one-time consumption under con
   assert.equal(values.has("oauth-state"), false);
 });
 
+test("Durable Object stores once and consumes a valid state exactly once", async () => {
+  const values = new Map();
+  const storage = {
+    async get(key) { return values.get(key); },
+    async put(key, value) { values.set(key, value); },
+    async delete(key) { return values.delete(key); },
+    async setAlarm() {},
+    async transaction(callback) {
+      return callback({
+        get: async (key) => values.get(key),
+        put: async (key, value) => values.set(key, value),
+        delete: async (key) => values.delete(key),
+      });
+    },
+  };
+  const durableObject = new OAuthStateDO({ storage });
+  const record = { value: "one-time-state", expiresAt: Date.now() + 60_000 };
+  const storeRequest = () => new Request("https://do.example/store", {
+    method: "POST",
+    body: JSON.stringify(record),
+  });
+  assert.equal((await durableObject.fetch(storeRequest())).status, 201);
+  assert.equal((await durableObject.fetch(storeRequest())).status, 409);
+
+  const firstConsume = await durableObject.fetch(new Request("https://do.example/consume", { method: "POST" }));
+  assert.equal(firstConsume.status, 200);
+  assert.deepEqual(await firstConsume.json(), { value: "one-time-state" });
+  const replay = await durableObject.fetch(new Request("https://do.example/consume", { method: "POST" }));
+  assert.equal(replay.status, 404);
+  assert.deepEqual(await replay.json(), { value: null });
+});
+
+test("Durable Object consumes and deletes an expired state without returning its value", async () => {
+  const values = new Map([["oauth-state", { value: "expired-state", expiresAt: Date.now() - 1 }]]);
+  const storage = {
+    async transaction(callback) {
+      return callback({
+        get: async (key) => values.get(key),
+        delete: async (key) => values.delete(key),
+      });
+    },
+  };
+  const durableObject = new OAuthStateDO({ storage });
+  const response = await durableObject.fetch(new Request("https://do.example/consume", { method: "POST" }));
+  assert.equal(response.status, 404);
+  assert.deepEqual(await response.json(), { value: null });
+  assert.equal(values.has("oauth-state"), false);
+});
+
 test("Durable Object rejects malformed state records and expires abandoned state", async () => {
   const values = new Map();
   let alarmAt = null;
