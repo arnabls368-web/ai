@@ -217,3 +217,36 @@ test("rejects a server acknowledgement beyond the submitted staged chunk", async
     }),
   }), /acknowledged bytes beyond the submitted chunk/);
 });
+
+
+test("rejects resumable session progress that moves backwards after a partial chunk", async () => {
+  const totalBytes = 600 * 1024;
+  let uploadCalls = 0;
+  await assert.rejects(uploadResumableVideoFromRanges({
+    uploadUrl: "https://www.googleapis.com/upload/session",
+    totalBytes,
+    mimeType: "video/mp4",
+    accessToken: "test-token",
+    chunkBytes: 256 * 1024,
+    readRange: async (start, end) => ({
+      body: new Uint8Array(end - start + 1),
+      byteLength: end - start + 1,
+    }),
+    fetchImpl: async (_url, init) => {
+      if (init.headers.get("Content-Range") === "bytes */" + totalBytes) {
+        return new Response(null, {
+          status: 308,
+          headers: { Range: "bytes=0-0" },
+        });
+      }
+      uploadCalls += 1;
+      if (uploadCalls === 1) {
+        return new Response(null, {
+          status: 308,
+          headers: { Range: "bytes=0-262143" },
+        });
+      }
+      throw new Error("connection reset");
+    },
+  }), /progress moved backwards/);
+});
