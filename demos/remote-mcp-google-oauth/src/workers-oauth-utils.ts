@@ -209,12 +209,14 @@ export function generateCSRFProtection(): CSRFProtectionResult {
 }
 
 /**
- * Validates that the CSRF token from the form matches the token in the cookie.
- * Per RFC 9700 Section 2.1, CSRF tokens must be one-time use.
+ * Validates the short-lived double-submit CSRF token by comparing the form
+ * value with the HttpOnly, Secure, SameSite cookie. The cookie is cleared in
+ * the successful response; this is not server-side atomic one-time consumption,
+ * so concurrent submissions may both validate before the browser processes it.
  *
  * @param formData - The parsed form data containing the CSRF token
  * @param request - The HTTP request containing cookies
- * @returns Object containing clearCookie header to invalidate the token
+ * @returns Object containing clearCookie header to expire the browser token
  * @throws {OAuthError} If CSRF token is missing or mismatched
  */
 export function validateCSRFToken(formData: FormData, request: Request): ValidateCSRFResult {
@@ -239,8 +241,7 @@ export function validateCSRFToken(formData: FormData, request: Request): Validat
 		throw new OAuthError("invalid_request", "CSRF token mismatch", 400);
 	}
 
-	// RFC 9700: CSRF tokens must be one-time use
-	// Clear the cookie to prevent reuse
+	// Expire the short-lived double-submit cookie after successful validation.
 	const clearCookie = `${csrfCookieName}=; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=0`;
 
 	return { clearCookie };
