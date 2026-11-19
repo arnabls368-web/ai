@@ -923,6 +923,15 @@ test("signed asset-write authorization stores uploaded bytes in private object s
         assert.equal(storedRequest.method, "PUT");
         assert.deepEqual(storedRequest.body, stagedBytes);
         assert.ok(storedRequest.url.startsWith("https://nexus-private.objects.example.test/staged-assets/tenant-a/project-1/"));
+        const stagedImage = await originalFetch(`${server.base}/staged-assets/not-a-video`, {
+          method: "PUT",
+          headers: {
+            ...signedHeader("tenant-a", "project-1", "asset:write"),
+            "content-type": "image/png",
+          },
+          body: Buffer.from("not-a-video"),
+        });
+        assert.equal(stagedImage.status, 415);
       } finally {
         await server.close();
       }
