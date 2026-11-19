@@ -184,47 +184,47 @@ export async function uploadResumableVideoFromRanges({
       }
 
       const end = Math.min(totalBytes - 1, offset + chunkBytes - 1);
-      let range;
+      const range = await readRange(offset, end);
+      const expectedBytes = end - offset + 1;
+      if (!range || range.byteLength !== expectedBytes ||
+          !(range.body instanceof ReadableStream || range.body instanceof ArrayBuffer || range.body instanceof Uint8Array)) {
+        throw new Error("Staged video range returned an invalid body or byte length.");
+      }
+      const headers = new Headers({
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": mimeType,
+        "Content-Range": `bytes ${offset}-${end}/${totalBytes}`,
+      });
+      let uploaded;
       try {
-        range = await readRange(offset, end);
-        const expectedBytes = end - offset + 1;
-        if (!range || range.byteLength !== expectedBytes ||
-            !(range.body instanceof ReadableStream || range.body instanceof ArrayBuffer || range.body instanceof Uint8Array)) {
-          throw new Error("Staged video range returned an invalid body or byte length.");
-        }
-        const headers = new Headers({
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": mimeType,
-          "Content-Range": `bytes ${offset}-${end}/${totalBytes}`,
-        });
-        const uploaded = await fetchImpl(uploadUrl, {
+        uploaded = await fetchImpl(uploadUrl, {
           method: "PUT",
           redirect: "error",
           signal: AbortSignal.timeout(120_000),
           headers,
           body: range.body,
         });
-        if (uploaded.status === 308) {
-          const acknowledged = nextUploadOffset(uploaded.headers.get("Range"), totalBytes);
-          await uploaded.body?.cancel();
-          if (acknowledged > offset) {
-            offset = acknowledged;
-            advanced = true;
-            break;
-          }
-          lastFailure = new Error("YouTube did not acknowledge progress for the uploaded chunk.");
-          mustCheckStatus = true;
-          continue;
-        }
-        if (uploaded.ok || uploaded.status < 500) return uploaded;
-        lastFailure = new Error(`YouTube upload temporarily failed (HTTP ${uploaded.status}).`);
-        await uploaded.body?.cancel();
-        mustCheckStatus = true;
       } catch (error) {
-        if (error instanceof Error && error.message.startsWith("Staged video range returned")) throw error;
         lastFailure = error instanceof Error ? error : new Error("Video upload connection failed.");
         mustCheckStatus = true;
+        continue;
       }
+      if (uploaded.status === 308) {
+        const acknowledged = nextUploadOffset(uploaded.headers.get("Range"), totalBytes);
+        await uploaded.body?.cancel();
+        if (acknowledged > offset) {
+          offset = acknowledged;
+          advanced = true;
+          break;
+        }
+        lastFailure = new Error("YouTube did not acknowledge progress for the uploaded chunk.");
+        mustCheckStatus = true;
+        continue;
+      }
+      if (uploaded.ok || uploaded.status < 500) return uploaded;
+      lastFailure = new Error(`YouTube upload temporarily failed (HTTP ${uploaded.status}).`);
+      await uploaded.body?.cancel();
+      mustCheckStatus = true;
     }
     if (!advanced && offset < totalBytes) {
       throw new Error(
