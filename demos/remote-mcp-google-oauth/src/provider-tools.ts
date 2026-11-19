@@ -72,6 +72,87 @@ async function providerJson(url: string, init: RequestInit, provider: string): P
 
 export function registerProviderTools(server: McpServer) {
   server.registerTool(
+    "nexus_search_media_models",
+    {
+      description: "Search fal.ai's live model catalogue before generation. Filter by keyword, category (for example text-to-video, image-to-video, text-to-image, text-to-speech), or exact endpoint ID. Optionally return the model's OpenAPI schema so you can construct valid model-specific input. Read-only; does not submit or bill a generation.",
+      inputSchema: z.object({
+        query: z.string().min(1).max(120).optional(),
+        category: z.string().min(2).max(80).optional(),
+        endpointId: z.string().min(3).max(200).optional(),
+        limit: z.number().int().min(1).max(10).default(5),
+        includeSchema: z.boolean().default(false),
+      }),
+    },
+    async ({ query, category, endpointId, limit, includeSchema }) => {
+      try {
+        const apiKey = secret("FAL_KEY");
+        if (!apiKey) throw new Error("fal.ai is not configured on this Worker. Add FAL_KEY as a Cloudflare Worker secret.");
+        const url = new URL("https://api.fal.ai/v1/models");
+        url.searchParams.set("limit", String(limit));
+        url.searchParams.set("status", "active");
+        if (query) url.searchParams.set("q", query);
+        if (category) url.searchParams.set("category", category);
+        if (endpointId) url.searchParams.set("endpoint_id", endpointId);
+        if (includeSchema) url.searchParams.append("expand", "openapi-3.0");
+        const data = await providerJson(url.toString(), {
+          headers: { Authorization: `Key ${apiKey}`, Accept: "application/json" },
+        }, "fal.ai model catalogue");
+        if (!Array.isArray(data.models)) throw new Error("fal.ai returned an invalid model catalogue response.");
+        return result({
+          models: data.models.slice(0, limit).map((model: any) => ({
+            endpointId: model.endpoint_id,
+            name: model.metadata?.display_name,
+            category: model.metadata?.category,
+            description: model.metadata?.description,
+            status: model.metadata?.status,
+            tags: Array.isArray(model.metadata?.tags) ? model.metadata.tags.slice(0, 12) : [],
+            modelUrl: model.metadata?.model_url,
+            ...(includeSchema && model.openapi ? { openapi: model.openapi } : {}),
+          })),
+          nextCursor: typeof data.next_cursor === "string" ? data.next_cursor : null,
+          hasMore: data.has_more === true,
+          note: "Use the exact endpointId and inspect its schema before submitting generation. Catalogue metadata is not a price quote; check pricing separately. Search is read-only and does not create a billable job.",
+        });
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "nexus_get_media_model_pricing",
+    {
+      description: "Retrieve current fal.ai per-endpoint pricing and billing units before requesting paid image, audio or video generation. Read-only; does not submit a generation.",
+      inputSchema: z.object({
+        endpointId: z.string().min(3).max(200).regex(/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*){1,4}$/i),
+      }),
+    },
+    async ({ endpointId }) => {
+      try {
+        const apiKey = secret("FAL_KEY");
+        if (!apiKey) throw new Error("fal.ai is not configured on this Worker. Add FAL_KEY as a Cloudflare Worker secret.");
+        const url = new URL("https://api.fal.ai/v1/models/pricing");
+        url.searchParams.set("endpoint_id", endpointId);
+        const data = await providerJson(url.toString(), {
+          headers: { Authorization: `Key ${apiKey}`, Accept: "application/json" },
+        }, "fal.ai pricing");
+        if (!Array.isArray(data.prices)) throw new Error("fal.ai returned an invalid pricing response.");
+        return result({
+          endpointId,
+          prices: data.prices.slice(0, 20).map((price: any) => ({
+            unitPrice: price.unit_price,
+            unit: price.unit,
+            currency: price.currency,
+          })),
+          note: "Prices and billing units are provider-reported and may change. Video models may bill per generated second or per video. Check the model's current pricing immediately before approving generation; this is not a guaranteed final charge.",
+        });
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
     "nexus_research_web",
     {
       description: "Research a video topic with Exa web search. Returns source URLs, titles and relevant excerpts for script research and fact-checking. Requires EXA_API_KEY.",
