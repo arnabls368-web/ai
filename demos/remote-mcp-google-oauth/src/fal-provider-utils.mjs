@@ -64,7 +64,10 @@ export function recoverFalJobRecord(endpointId, requestId, createdAt = "") {
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
     throw new Error("A valid fal.ai endpoint ID and request ID are required for recovery.");
   }
-  const base = "https://queue.fal.run/" + endpointId + "/requests/" + requestId;
+  // Queue status/result URLs use owner/app, not any endpoint path suffix.
+  // For example, owner/app/text-to-video submits to owner/app/requests/{id}.
+  const modelId = endpointId.split("/").slice(0, 2).join("/");
+  const base = "https://queue.fal.run/" + modelId + "/requests/" + requestId;
   return {
     endpointId,
     requestId,
