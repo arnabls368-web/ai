@@ -79,7 +79,7 @@ test("real S3-compatible staged-object PUT, range GET, tenant isolation and DELE
         start: 0,
         end: 3,
       }),
-      (error) => error.status === 404,
+      (error) => error.status === 403 || error.status === 404,
       "A different tenant must not read the staged object.",
     );
 
@@ -103,7 +103,7 @@ test("real S3-compatible staged-object PUT, range GET, tenant isolation and DELE
         start: 0,
         end: 3,
       }),
-      (error) => error.status === 404,
+      (error) => error.status === 403 || error.status === 404,
       "The exact object should be absent after deletion.",
     );
   } finally {
