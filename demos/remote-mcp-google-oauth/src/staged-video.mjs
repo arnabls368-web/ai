@@ -134,7 +134,7 @@ export async function deleteStagedVideoAsset({ assetId, extension, callRenderer 
   const response = await callRenderer({
     method: "DELETE",
     scope: "asset:delete",
-    path: "/assets/" + assetId + "/" + extension,
+    path: "/staged-assets/" + assetId + "/" + extension,
   });
   if (!response.ok) {
     const status = response.status;
