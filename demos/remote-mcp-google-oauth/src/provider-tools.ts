@@ -5,6 +5,7 @@ import { getMcpAuthContext } from "agents/mcp/server";
 import { readJsonLimited } from "./utils";
 import { classifyFalGenerationStatus } from "./fal-status.mjs";
 import { recoverFalJobRecord, tryPersistFalCompletion, trustedFalUrl, validateFalJobRecord } from "./fal-provider-utils.mjs";
+import { createFalRecoveryToken, verifyFalRecoveryToken } from "./fal-recovery-token.mjs";
 import { normalizeFalModelCatalogue, normalizeFalPricing } from "./fal-catalog-utils.mjs";
 import { buildFalCostEstimateRequest, normalizeFalCostEstimate } from "./fal-cost-estimate.mjs";
 import { requestHumanApproval } from "./human-approval.mjs";
@@ -73,6 +74,31 @@ async function providerJson(url: string, init: RequestInit, provider: string): P
 }
 
 
+
+async function loadFalJobRecord(key: string, scope: string, apiKey: string, requestId: string, endpointId?: string, recoveryToken?: string) {
+  type Job = { endpointId: string; requestId: string; statusUrl: string; responseUrl: string; cancelUrl?: string; createdAt: string };
+  let job: Job | null = null;
+  let readFailed = false;
+  try {
+    job = await env.OAUTH_KV.get<Job>(key, "json");
+  } catch {
+    readFailed = true;
+  }
+  if (job) return job;
+  const authorized = Boolean(endpointId && recoveryToken &&
+    await verifyFalRecoveryToken(apiKey, scope, endpointId, requestId, recoveryToken));
+  if (!authorized || !endpointId) {
+    if (readFailed) throw new Error("NEXUS could not read the fal.ai tracking record. Retry with the endpointId and account-bound recoveryToken returned by the original submission.");
+    throw new Error("fal.ai job record not found for this account. Recovery requires the endpointId and valid account-bound recoveryToken returned by the original submission.");
+  }
+  const recovered = recoverFalJobRecord(endpointId, requestId);
+  try {
+    await env.OAUTH_KV.put(key, JSON.stringify(recovered), { expirationTtl: 60 * 60 * 24 * 7 });
+  } catch {
+    // The signed, account-bound in-memory record remains usable for this request.
+  }
+  return recovered;
+}
 
 async function estimateFalCost(apiKey: string, endpointId: string, estimateType: "historical_api_price" | "unit_price", quantity: number): Promise<{ estimateType: string; totalCost: number; currency: string }> {
   const requestBody = buildFalCostEstimateRequest(endpointId, estimateType, quantity);
@@ -293,6 +319,8 @@ export function registerProviderTools(server: McpServer) {
           ...(typeof submitted.cancel_url === "string" ? { cancelUrl: trustedFalUrl(submitted.cancel_url) } : {}),
           createdAt: new Date().toISOString(),
         };
+        const recoveryExpiresAt = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 7;
+        const recoveryToken = await createFalRecoveryToken(apiKey, scope, endpointId, submitted.request_id, recoveryExpiresAt);
         let trackingSaved = true;
         try {
           await env.OAUTH_KV.put(`nexus:fal-jobs:v1:${scope}:${submitted.request_id}`, JSON.stringify(record), { expirationTtl: 60 * 60 * 24 * 7 });
@@ -304,9 +332,11 @@ export function registerProviderTools(server: McpServer) {
           endpointId,
           requestId: submitted.request_id,
           queuePosition: submitted.queue_position,
+          recoveryToken,
+          recoveryTokenExpiresAt: new Date(recoveryExpiresAt * 1000).toISOString(),
           nextTool: "nexus_get_media_generation",
           ...(!trackingSaved ? {
-            trackingWarning: "fal.ai accepted this billable job, but NEXUS could not save its tracking record. Do not submit it again. Recover status or cancellation by calling nexus_get_media_generation or nexus_cancel_media_generation with this requestId and endpointId.",
+            trackingWarning: "fal.ai accepted this billable job, but NEXUS could not save its tracking record. Do not submit it again. Recover status or cancellation with this requestId, endpointId and recoveryToken. Keep the recoveryToken private; it is a short-lived account-bound capability.",
           } : {}),
           note: "Poll the same request ID; do not submit the same generation again while it is running. Generation is billable according to the selected model.",
         });
@@ -319,25 +349,16 @@ export function registerProviderTools(server: McpServer) {
   server.registerTool(
     "nexus_get_media_generation",
     {
-      description: "Check a previously submitted fal.ai generation and retrieve its output when complete. Jobs are scoped to the authenticated Google account.",
-      inputSchema: z.object({ requestId: z.string().uuid(), endpointId: z.string().min(3).max(200).regex(/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*){1,4}$/i).optional() }),
+      description: "Check a previously submitted fal.ai generation and retrieve its output when complete. Saved jobs are account-scoped; KV-miss recovery requires the short-lived account-bound recoveryToken returned by submission.",
+      inputSchema: z.object({ requestId: z.string().uuid(), endpointId: z.string().min(3).max(200).regex(/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*){1,4}$/i).optional(), recoveryToken: z.string().min(1).max(256).optional() }),
     },
-    async ({ requestId, endpointId }) => {
+    async ({ requestId, endpointId, recoveryToken }) => {
       try {
         const apiKey = secret("FAL_KEY");
         if (!apiKey) throw new Error("fal.ai is not configured on this Worker. Add FAL_KEY as a Cloudflare Worker secret.");
         const scope = await accountScope();
         const key = `nexus:fal-jobs:v1:${scope}:${requestId}`;
-        let job = await env.OAUTH_KV.get<{ endpointId: string; requestId: string; statusUrl: string; responseUrl: string; cancelUrl?: string; createdAt: string }>(key, "json");
-        if (!job && endpointId) {
-          job = recoverFalJobRecord(endpointId, requestId);
-          try {
-            await env.OAUTH_KV.put(key, JSON.stringify(job), { expirationTtl: 60 * 60 * 24 * 7 });
-          } catch {
-            // Continue with the validated in-memory record; a KV outage must not block recovery.
-          }
-        }
-        if (!job) throw new Error("fal.ai job not found for this account, or its 7-day tracking record expired. If the original submission returned a tracking warning, retry with its endpointId.");
+        const job = await loadFalJobRecord(key, scope, apiKey, requestId, endpointId, recoveryToken);
         // Treat KV records as untrusted at the point of use too: validate their
         // shape and provider origins before attaching the secret API key.
         const validatedJob = validateFalJobRecord(job, requestId);
@@ -381,25 +402,16 @@ export function registerProviderTools(server: McpServer) {
   server.registerTool(
     "nexus_cancel_media_generation",
     {
-      description: "Request cancellation of a fal.ai generation job submitted by the signed-in Google account. A queued job may be removed; an in-progress runner receives a cancellation signal, but stopping is model-dependent. Does not cancel or refund work already completed.",
-      inputSchema: z.object({ requestId: z.string().uuid(), endpointId: z.string().min(3).max(200).regex(/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*){1,4}$/i).optional() }),
+      description: "Request cancellation of a fal.ai generation job submitted by the signed-in Google account. KV-miss recovery requires the short-lived account-bound recoveryToken returned by submission. A queued job may be removed; an in-progress runner receives a cancellation signal, but stopping is model-dependent. Does not cancel or refund work already completed.",
+      inputSchema: z.object({ requestId: z.string().uuid(), endpointId: z.string().min(3).max(200).regex(/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*){1,4}$/i).optional(), recoveryToken: z.string().min(1).max(256).optional() }),
     },
-    async ({ requestId, endpointId }) => {
+    async ({ requestId, endpointId, recoveryToken }) => {
       try {
         const apiKey = secret("FAL_KEY");
         if (!apiKey) throw new Error("fal.ai is not configured on this Worker. Add FAL_KEY as a Cloudflare Worker secret.");
         const scope = await accountScope();
         const key = "nexus:fal-jobs:v1:" + scope + ":" + requestId;
-        let job = await env.OAUTH_KV.get<{ endpointId: string; requestId: string; statusUrl: string; responseUrl: string; cancelUrl?: string; createdAt: string }>(key, "json");
-        if (!job && endpointId) {
-          job = recoverFalJobRecord(endpointId, requestId);
-          try {
-            await env.OAUTH_KV.put(key, JSON.stringify(job), { expirationTtl: 60 * 60 * 24 * 7 });
-          } catch {
-            // The validated URL can still be used for this account-scoped cancellation attempt.
-          }
-        }
-        if (!job) throw new Error("fal.ai job not found for this account, or its 7-day tracking record expired. If the original submission returned a tracking warning, retry with its endpointId.");
+        const job = await loadFalJobRecord(key, scope, apiKey, requestId, endpointId, recoveryToken);
         const validatedJob = validateFalJobRecord(job, requestId);
         if (!validatedJob.cancelUrl) {
           throw new Error("This job predates cancellation support and has no saved fal.ai cancellation URL. It can still be checked with nexus_get_media_generation.");
