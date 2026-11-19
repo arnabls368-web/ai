@@ -8,7 +8,7 @@ import { readJsonLimited, refreshGoogleAccessToken } from "./utils";
 import { registerProductionTools } from "./production-tools";
 import { registerProviderTools } from "./provider-tools";
 import { callPrivateRenderer } from "./render-auth";
-import { hasExactlyOneUploadSource, isVerifiedRenderJob } from "./upload-source.mjs";
+import { hasExactlyOneUploadSource, isVerifiedRenderJob, isCompleteUploadSourceResponse } from "./upload-source.mjs";
 import { uploadResumableVideoFromRanges } from "./youtube-resumable.mjs";
 import { stageVideoSource, createStagedVideoRangeReader, deleteStagedVideoAsset } from "./staged-video.mjs";
 import { requestHumanApproval } from "./human-approval.mjs";
@@ -179,7 +179,7 @@ function createServer() {
           const safeUrl = validateExternalVideoUrl(videoUrl!, allowedHosts);
           source = await fetch(safeUrl, { redirect: "error", signal: AbortSignal.timeout(120_000) });
         }
-        if (!source.ok) { const status = source.status; await source.body?.cancel(); throw new Error("Could not retrieve video (HTTP " + status + ")."); }
+        if (!isCompleteUploadSourceResponse(source.status)) { const status = source.status; await source.body?.cancel(); throw new Error("Could not retrieve a complete video (HTTP " + status + ")."); }
         const mimeType = (source.headers.get("Content-Type") || "").split(";")[0].trim().toLowerCase();
         if (!["video/mp4", "video/quicktime", "video/webm", "video/x-matroska"].includes(mimeType)) {
           await source.body?.cancel();
