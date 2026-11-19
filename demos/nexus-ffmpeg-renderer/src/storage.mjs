@@ -234,7 +234,7 @@ export const MAX_ASSET_BYTES_LIMIT = MAX_ASSET_BYTES;
 
 /** Delete a tenant/project-scoped private staged asset. Missing objects are already clean. */
 export async function deletePrivateAsset({ tenantId, projectId, assetId, extension }) {
-  if (!/^\.(?:mp4|mov|m4v|webm|mkv)$/i.test(extension)) {
+  if (typeof extension !== "string" || ![".mp4", ".mov", ".m4v", ".webm", ".mkv"].includes(extension.toLowerCase())) {
     throw new Error("Unsupported staged video extension.");
   }
   const response = await signedRequest({
