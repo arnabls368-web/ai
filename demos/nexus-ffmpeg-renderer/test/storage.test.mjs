@@ -307,3 +307,72 @@ test("streams file-backed private assets with a signed content hash and exact le
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+
+test("streams a signed bounded byte range from private video storage", async () => {
+  const keys = ["AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION", "AWS_S3_URL_STYLE"];
+  const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  const originalFetch = globalThis.fetch;
+  let captured;
+  try {
+    process.env.AWS_ENDPOINT_URL = "https://objects.example.test";
+    process.env.AWS_S3_BUCKET_NAME = "nexus-private";
+    process.env.AWS_ACCESS_KEY_ID = "test-access";
+    process.env.AWS_SECRET_ACCESS_KEY = "test-secret";
+    process.env.AWS_DEFAULT_REGION = "auto";
+    process.env.AWS_S3_URL_STYLE = "virtual-host";
+    globalThis.fetch = async (url, init) => {
+      captured = { url: String(url), init };
+      return new Response(new Uint8Array([3, 4, 5]), {
+        status: 206,
+        headers: { "content-range": "bytes 3-5/20", "content-length": "3" },
+      });
+    };
+    const { getPrivateAssetRange } = await import("../src/storage.mjs");
+    const range = await getPrivateAssetRange({
+      tenantId: "tenant-range", projectId: "project-range",
+      assetId: "video-1", extension: ".mp4", start: 3, end: 5,
+    });
+    assert.equal(captured.init.method, "GET");
+    assert.equal(captured.init.headers.get("range"), "bytes=3-5");
+    assert.match(captured.init.headers.get("authorization"), /SignedHeaders=.*range/);
+    assert.equal(range.contentRange, "bytes 3-5/20");
+    assert.equal(range.contentLength, 3);
+    assert.equal(range.totalBytes, 20);
+    assert.deepEqual(Buffer.from(await new Response(range.body).arrayBuffer()), Buffer.from([3, 4, 5]));
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("rejects inconsistent private object range metadata", async () => {
+  const keys = ["AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION"];
+  const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  const originalFetch = globalThis.fetch;
+  try {
+    process.env.AWS_ENDPOINT_URL = "https://objects.example.test";
+    process.env.AWS_S3_BUCKET_NAME = "nexus-private";
+    process.env.AWS_ACCESS_KEY_ID = "test-access";
+    process.env.AWS_SECRET_ACCESS_KEY = "test-secret";
+    process.env.AWS_DEFAULT_REGION = "auto";
+    globalThis.fetch = async () => new Response(new Uint8Array([1, 2]), {
+      status: 206,
+      headers: { "content-range": "bytes 0-2/20", "content-length": "2" },
+    });
+    const { getPrivateAssetRange } = await import("../src/storage.mjs");
+    await assert.rejects(getPrivateAssetRange({
+      tenantId: "tenant-range", projectId: "project-range",
+      assetId: "video-1", extension: ".mp4", start: 0, end: 2,
+    }), /inconsistent range metadata/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
