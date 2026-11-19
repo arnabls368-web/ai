@@ -25,7 +25,7 @@ test("streams a supported source into private staging and returns verified metad
   });
   assert.equal(request.method, "PUT");
   assert.equal(request.scope, "asset:write");
-  assert.equal(request.path, "/assets/asset-1");
+  assert.equal(request.path, "/staged-assets/asset-1");
   assert.equal(request.contentType, "video/mp4");
   assert.deepEqual(staged, {
     assetId: "asset-1",
@@ -114,7 +114,7 @@ test("range reader requests and validates exact bounded byte ranges", async () =
   const result = await readRange(3, 5);
   assert.equal(request.method, "GET");
   assert.equal(request.scope, "asset:read");
-  assert.equal(request.path, "/assets/asset-1/mp4");
+  assert.equal(request.path, "/staged-assets/asset-1/mp4");
   assert.equal(request.range, "bytes=3-5");
   assert.equal(result.byteLength, 3);
   assert.deepEqual([...new Uint8Array(await new Response(result.body).arrayBuffer())], [4, 5, 6]);
@@ -149,7 +149,7 @@ test("staged video cleanup uses the dedicated scoped DELETE route", async () => 
   assert.deepEqual(request, {
     method: "DELETE",
     scope: "asset:delete",
-    path: "/assets/asset-1/mp4",
+    path: "/staged-assets/asset-1/mp4",
   });
 });
 
