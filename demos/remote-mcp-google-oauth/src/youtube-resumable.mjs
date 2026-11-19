@@ -83,7 +83,8 @@ export async function uploadResumableVideo({
         redirect: "error",
         signal: AbortSignal.timeout(120_000),
         headers,
-        body: videoBytes.slice(offset),
+        // A view avoids copying the remaining video bytes on every retry.
+        body: new Uint8Array(videoBytes, offset),
       });
 
       if (uploaded.status === 308) {
