@@ -106,6 +106,11 @@ function objectKey(tenantId, projectId, assetId, extension, prefix = "assets") {
   if (prefix !== "assets" && prefix !== "staged-assets") {
     throw new Error("Private asset storage prefix is not allowed.");
   }
+  const safeSegment = (value) => typeof value === "string" &&
+    /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value) && value !== "." && value !== "..";
+  if (!safeSegment(tenantId) || !safeSegment(projectId)) {
+    throw new Error("Private asset tenant or project identifier is invalid.");
+  }
   const digest = createHash("sha256").update(assetId).digest("hex");
   return prefix + "/" + tenantId + "/" + projectId + "/" + digest + extension;
 }
@@ -295,8 +300,8 @@ export async function cleanupStagedAssets({
       const modified = xmlTag(match[1], "LastModified");
       const timestamp = modified ? Date.parse(modified) : NaN;
       scanned += 1;
-      if (!key || !key.startsWith("staged-assets/") ||
-          !/\.(?:mp4|mov|m4v|webm|mkv)$/i.test(key) ||
+      if (!key ||
+          !/^staged-assets\/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\/[a-f0-9]{64}\.(?:mp4|mov|m4v|webm|mkv)$/i.test(key) ||
           !Number.isFinite(timestamp) || timestamp > cutoff) continue;
       const removal = await signedRequest({ method: "DELETE", key });
       if (!removal.ok && removal.status !== 404) {
