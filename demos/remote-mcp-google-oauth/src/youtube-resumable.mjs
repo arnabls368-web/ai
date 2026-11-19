@@ -181,13 +181,13 @@ export async function uploadResumableVideoFromRanges({
 
   let offset = 0;
   let checkSession = checkStatusFirst;
+  let allowPreviouslyAcceptedProgress = checkStatusFirst;
   while (offset < totalBytes) {
     let lastFailure;
     let mustCheckStatus = checkSession;
     checkSession = false;
     let advanced = false;
-    // A fresh status-first pass may discover bytes accepted by the previous token/session attempt.
-    let lastSentEnd = mustCheckStatus && checkStatusFirst ? totalBytes - 1 : offset - 1;
+    let lastSentEnd = offset - 1;
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       if (mustCheckStatus) {
         try {
@@ -207,11 +207,12 @@ export async function uploadResumableVideoFromRanges({
               await status.body?.cancel();
               throw new Error("YouTube resumable-upload progress moved backwards.");
             }
-            if (acknowledged > lastSentEnd + 1) {
+            if (acknowledged > lastSentEnd + 1 && !allowPreviouslyAcceptedProgress) {
               await status.body?.cancel();
               throw new Error("YouTube acknowledged bytes beyond the submitted chunk.");
             }
             await status.body?.cancel();
+            allowPreviouslyAcceptedProgress = false;
             if (acknowledged >= totalBytes) {
               throw new Error("YouTube reported an incomplete upload after acknowledging every byte.");
             }
