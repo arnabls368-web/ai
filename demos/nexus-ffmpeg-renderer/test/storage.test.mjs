@@ -431,8 +431,8 @@ test("sweeps only expired video objects under the staged-assets prefix", async (
         listingUrl = String(url);
         const xml = '<?xml version="1.0"?>' +
           '<ListBucketResult>' +
-          '<Contents><Key>staged-assets/tenant-a/project-a/old.mp4</Key><LastModified>2026-11-18T00:00:00.000Z</LastModified></Contents>' +
-          '<Contents><Key>staged-assets/tenant-a/project-a/recent.webm</Key><LastModified>2026-11-19T03:30:00.000Z</LastModified></Contents>' +
+          '<Contents><Key>staged-assets/tenant-a/project-a/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.mp4</Key><LastModified>2026-11-18T00:00:00.000Z</LastModified></Contents>' +
+          '<Contents><Key>staged-assets/tenant-a/project-a/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.webm</Key><LastModified>2026-11-19T03:30:00.000Z</LastModified></Contents>' +
           '<Contents><Key>assets/tenant-a/project-a/permanent.mp4</Key><LastModified>2026-11-17T00:00:00.000Z</LastModified></Contents>' +
           '<Contents><Key>staged-assets/tenant-a/project-a/image.png</Key><LastModified>2026-11-17T00:00:00.000Z</LastModified></Contents>' +
           '</ListBucketResult>';
@@ -450,7 +450,7 @@ test("sweeps only expired video objects under the staged-assets prefix", async (
     assert.equal(new URL(listingUrl).searchParams.get("prefix"), "staged-assets/");
     assert.equal(new URL(listingUrl).searchParams.get("list-type"), "2");
     assert.equal(deleted.length, 1);
-    assert.match(deleted[0], /staged-assets\/tenant-a\/project-a\/old\.mp4$/);
+    assert.match(deleted[0], /staged-assets\/tenant-a\/project-a\/[a-f0-9]{64}\.mp4$/);
     assert.match(new URL(listingUrl).search, /prefix=staged-assets%2F/);
   } finally {
     globalThis.fetch = originalFetch;
@@ -508,7 +508,7 @@ test("paginates staged object listings with safely encoded continuation tokens",
       }
       return new Response(
         "<ListBucketResult><IsTruncated>false</IsTruncated>" +
-        "<Contents><Key>staged-assets/tenant/project/expired.mkv</Key><LastModified>2026-11-18T00:00:00.000Z</LastModified></Contents>" +
+        "<Contents><Key>staged-assets/tenant/project/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.mkv</Key><LastModified>2026-11-18T00:00:00.000Z</LastModified></Contents>" +
         "</ListBucketResult>",
       );
     };
@@ -537,4 +537,22 @@ test("rejects private object keys outside the permanent and staging namespaces",
     extension: ".mp4",
     prefix: "assets/../../other",
   }), /prefix is not allowed/);
+});
+
+test("rejects traversal in private storage tenant and project identifiers", async () => {
+  const { deletePrivateAsset } = await import("../src/storage.mjs");
+  await assert.rejects(deletePrivateAsset({
+    tenantId: "../assets",
+    projectId: "project-a",
+    assetId: "asset-a",
+    extension: ".mp4",
+    prefix: "staged-assets",
+  }), /identifier is invalid/);
+  await assert.rejects(deletePrivateAsset({
+    tenantId: "tenant-a",
+    projectId: "..",
+    assetId: "asset-a",
+    extension: ".mp4",
+    prefix: "staged-assets",
+  }), /identifier is invalid/);
 });
