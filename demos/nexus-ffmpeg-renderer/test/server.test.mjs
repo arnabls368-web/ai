@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { request as httpRequest } from "node:http";
 import { createRenderJobServer } from "../src/server.mjs";
-import { signRenderToken } from "../src/auth.mjs";
+import { signRenderToken, verifyRenderToken } from "../src/auth.mjs";
 
 const TOKEN = "test-token-that-is-at-least-32-characters-long";
 const SIGNING_SECRET = "test-signing-secret-that-is-at-least-32-characters";
@@ -1109,6 +1109,10 @@ test("staged asset deletion requires asset:delete scope and deletes only the sig
       const instance = await startSignedServer(workRoot);
       try {
         const token = signedHeader("tenant-cleanup", "project-cleanup", "asset:delete").authorization;
+        assert.equal(
+          verifyRenderToken(token.slice("Bearer ".length), { secret: SIGNING_SECRET, scope: "asset:delete" })?.tenantId,
+          "tenant-cleanup",
+        );
         const result = await new Promise((resolve, reject) => {
           const req = httpRequest(instance.base + "/assets/asset-123/mp4", {
             method: "DELETE",
