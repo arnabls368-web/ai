@@ -27,7 +27,7 @@ The provider-status tools report whether integrations are configured. A configur
 5. **Railway FFmpeg renderer:** retrieves private assets, renders MP4 output, persists job records and output files on its mounted volume, and serves status/output through signed tenant/project-scoped requests.
 6. **YouTube Data API:** uploads a completed video as private only after a separate exact-operation approval.
 
-The renderer is intentionally a single-process, single-replica service. Its queue is in memory, with one concurrent render by default and a bounded queue; it is not a distributed job system. The Worker and renderer use bounded transfers (100 MiB for an asset transfer; 50 MiB for YouTube upload). Do not increase these limits without redesigning memory use and resource controls.
+The renderer is intentionally a single-process, single-replica service. Its queue is in memory, with one concurrent render by default and a bounded queue; it is not a distributed job system. The Worker and renderer use bounded transfers (100 MiB for general assets; 50 MiB for staged YouTube video sources). Video sources are streamed into account/project-scoped private object storage, then read back in bounded byte ranges for YouTube resumable upload; the Worker does not buffer the complete video. Do not increase these limits without redesigning resource controls.
 
 ## Verification status and production gates
 
@@ -42,6 +42,7 @@ The following live-provider workflows have **not** yet been proven end to end:
 - A real render job that retrieves private objects, creates an MP4, and returns it through the signed output route.
 - Recovery of a real job/output across a Railway container restart.
 - A complete authenticated Google OAuth and YouTube upload test.
+- Lifecycle/retention verification for staged video objects in the configured S3-compatible provider.
 
 A healthy `/health` endpoint proves process liveness only. It does not prove storage access, rendering, output retrieval, OAuth, or YouTube upload.
 
@@ -128,8 +129,10 @@ vidIQ provides a separate hosted remote MCP endpoint at `https://mcp.vidiq.com/m
 ## Upload behavior
 
 - Accepts either a public HTTPS video URL or a completed NEXUS render job owned by the authenticated Google account.
-- Maximum video size: 50 MiB.
+- Maximum video size: 50 MiB; sources are streamed to private staging and uploaded to YouTube in 8 MiB ranges (final range may be smaller).
 - Video visibility is schema-locked to `private`.
+- The source is streamed into private account-scoped staging; its size and SHA-256 are verified from the renderer storage path.
 - Before starting a YouTube upload session, the tool requests interactive approval bound to the connected Google account, video SHA-256, title, description and privacy setting.
+- After approval, the uploader fetches bounded byte ranges from private staging and sends them through a resumable YouTube session; interrupted transfers query the acknowledged upload offset before retrying.
 - A decline, cancellation, missing approval context, or unsupported approval flow does not start an upload.
 - No video is uploaded during planning, research, asset generation, rendering or readiness checks.
