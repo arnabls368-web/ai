@@ -651,10 +651,27 @@ function registerRendererTools(server: McpServer) {
         const baseUrl = env.NEXUS_RENDERER_URL;
         const secret = env.NEXUS_RENDER_SIGNING_SECRET;
         if (!baseUrl || !secret) throw new Error("The private renderer URL and signing secret are not configured.");
+        // The project revision makes retries of one submission idempotent,
+        // while a later deliberate retry after status has been refreshed gets
+        // a new key. The renderer scopes this digest to tenant and project.
+        const idempotencyMaterial = JSON.stringify({
+          projectId,
+          revision: project.revision,
+          manifest: project.renderManifest,
+          assetMap: Object.fromEntries(Object.entries(assetMap).sort(([a], [b]) => a.localeCompare(b))),
+        });
+        const idempotencyDigest = await crypto.subtle.digest(
+          "SHA-256",
+          new TextEncoder().encode(idempotencyMaterial),
+        );
+        const idempotencyKey = Array.from(
+          new Uint8Array(idempotencyDigest),
+          (byte) => byte.toString(16).padStart(2, "0"),
+        ).join("");
         const response = await callPrivateRenderer({
           baseUrl, secret, tenantId: owner, projectId,
           scope: "render:submit", path: "/jobs", method: "POST",
-          body: { manifest: project.renderManifest, assetMap },
+          body: { manifest: project.renderManifest, assetMap, idempotencyKey },
         });
         if (response.status !== 202) {
           const status = response.status;
@@ -663,13 +680,13 @@ function registerRendererTools(server: McpServer) {
         }
         const submitted = await readJsonLimited(response, 65_536) as { id?: string; status?: string };
         if (typeof submitted.id !== "string" || !/^[0-9a-f-]{36}$/i.test(submitted.id) ||
-            !["queued", "running"].includes(submitted.status ?? "")) {
+            !["queued", "running", "succeeded", "failed"].includes(submitted.status ?? "")) {
           throw new Error("Private renderer returned an invalid render-job receipt.");
         }
         const latest = await env.OAUTH_KV.get<NexusProject>(projectKey(owner, projectId), "json");
         if (!latest) throw new Error("Project disappeared after render submission.");
         latest.renderJob = {
-          id: submitted.id, status: submitted.status as "queued" | "running",
+          id: submitted.id, status: submitted.status as "queued" | "running" | "succeeded" | "failed",
           createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
         };
         latest.revision += 1;
@@ -679,7 +696,7 @@ function registerRendererTools(server: McpServer) {
           content: [{
             type: "text" as const,
             text: JSON.stringify({
-              status: submitted.status === "running" ? "render_running" : "render_queued",
+              status: `render_${submitted.status}`,
               projectId,
               renderJobId: submitted.id,
               statusTool: "nexus_get_render_status",
