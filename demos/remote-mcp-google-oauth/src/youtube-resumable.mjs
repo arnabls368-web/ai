@@ -183,6 +183,7 @@ export async function uploadResumableVideoFromRanges({
     let lastFailure;
     let mustCheckStatus = false;
     let advanced = false;
+    let lastSentEnd = offset - 1;
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       if (mustCheckStatus) {
         try {
@@ -198,6 +199,10 @@ export async function uploadResumableVideoFromRanges({
           });
           if (status.status === 308) {
             const acknowledged = nextUploadOffset(status.headers.get("Range"), totalBytes);
+            if (acknowledged > lastSentEnd + 1) {
+              await status.body?.cancel();
+              throw new Error("YouTube acknowledged bytes beyond the submitted chunk.");
+            }
             await status.body?.cancel();
             if (acknowledged >= totalBytes) {
               throw new Error("YouTube reported an incomplete upload after acknowledging every byte.");
@@ -221,6 +226,7 @@ export async function uploadResumableVideoFromRanges({
 
       const end = Math.min(totalBytes - 1, offset + chunkBytes - 1);
       const expectedBytes = end - offset + 1;
+      lastSentEnd = end;
       const range = await readRange(offset, end);
       const chunkBody = await readStagedRangeBytes(range, expectedBytes);
       const headers = new Headers({
@@ -244,6 +250,10 @@ export async function uploadResumableVideoFromRanges({
       }
       if (uploaded.status === 308) {
         const acknowledged = nextUploadOffset(uploaded.headers.get("Range"), totalBytes);
+        if (acknowledged > end + 1) {
+          await uploaded.body?.cancel();
+          throw new Error("YouTube acknowledged bytes beyond the submitted chunk.");
+        }
         await uploaded.body?.cancel();
         if (acknowledged > offset) {
           offset = acknowledged;
