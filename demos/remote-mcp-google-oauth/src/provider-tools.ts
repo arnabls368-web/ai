@@ -326,18 +326,27 @@ export function registerProviderTools(server: McpServer) {
           trackingSaved = false;
         }
         const recoveryExpiresAt = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 7;
-        const recoveryToken = await createFalRecoveryToken(apiKey, scope, endpointId, submitted.request_id, recoveryExpiresAt);
+        let recoveryToken: string | undefined;
+        try {
+          recoveryToken = await createFalRecoveryToken(apiKey, scope, endpointId, submitted.request_id, recoveryExpiresAt);
+        } catch {
+          // A token-signing problem must never hide an already accepted billable job.
+        }
+        const trackingWarning = !trackingSaved && !recoveryToken
+          ? "fal.ai accepted this billable job, but NEXUS could neither save its tracking record nor issue a recovery token. Do not submit it again. Keep this requestId and endpointId; contact the NEXUS operator to recover it."
+          : !trackingSaved
+            ? "fal.ai accepted this billable job, but NEXUS could not save its tracking record. Do not submit it again. Recover status or cancellation with this requestId, endpointId and recoveryToken. Keep the recoveryToken private; it is a short-lived account-bound capability."
+            : !recoveryToken
+              ? "fal.ai accepted this billable job and its tracking record was saved, but NEXUS could not issue a recovery token. Do not submit it again; retry status checks using the requestId while the account-scoped KV record remains available."
+              : undefined;
         return result({
           status: submitted.status ?? "IN_QUEUE",
           endpointId,
           requestId: submitted.request_id,
           queuePosition: submitted.queue_position,
-          recoveryToken,
-          recoveryTokenExpiresAt: new Date(recoveryExpiresAt * 1000).toISOString(),
+          ...(recoveryToken ? { recoveryToken, recoveryTokenExpiresAt: new Date(recoveryExpiresAt * 1000).toISOString() } : {}),
           nextTool: "nexus_get_media_generation",
-          ...(!trackingSaved ? {
-            trackingWarning: "fal.ai accepted this billable job, but NEXUS could not save its tracking record. Do not submit it again. Recover status or cancellation with this requestId, endpointId and recoveryToken. Keep the recoveryToken private; it is a short-lived account-bound capability.",
-          } : {}),
+          ...(trackingWarning ? { trackingWarning } : {}),
           note: "Poll the same request ID; do not submit the same generation again while it is running. Generation is billable according to the selected model.",
         });
       } catch (error) {
