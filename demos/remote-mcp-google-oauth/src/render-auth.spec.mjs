@@ -105,3 +105,52 @@ test("private asset range reads reject malformed range headers before network ac
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("private staged-object cleanup uses a dedicated signed deletion scope", async () => {
+  const originalFetch = globalThis.fetch;
+  let captured;
+  try {
+    globalThis.fetch = async (url, init) => {
+      captured = { url: String(url), init };
+      return Response.json({ deleted: true });
+    };
+    const response = await callPrivateRenderer({
+      baseUrl: "https://renderer.example",
+      secret,
+      tenantId: "tenant",
+      projectId: "project",
+      scope: "asset:delete",
+      path: "/assets/asset-123/mp4",
+      method: "DELETE",
+    });
+    assert.equal(response.status, 200);
+    assert.equal(captured.init.method, "DELETE");
+    const token = captured.init.headers.get("authorization").slice("Bearer ".length);
+    const claims = verifyRenderToken(token, { secret, scope: "asset:delete" });
+    assert.equal(claims.projectId, "project");
+    assert.equal(claims.tenantId, "tenant");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("asset deletion rejects mismatched scopes and request shapes before network access", async () => {
+  const originalFetch = globalThis.fetch;
+  let called = false;
+  try {
+    globalThis.fetch = async () => { called = true; return new Response(null); };
+    await assert.rejects(callPrivateRenderer({
+      baseUrl: "https://renderer.example",
+      secret,
+      tenantId: "tenant",
+      projectId: "project",
+      scope: "asset:read",
+      path: "/assets/asset-123/mp4",
+      method: "DELETE",
+    }), /method or body does not match/);
+    assert.equal(called, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
