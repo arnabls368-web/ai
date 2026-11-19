@@ -173,7 +173,7 @@ export function createRenderJobServer({
             !record.assetMap || typeof record.assetMap !== "object" || Array.isArray(record.assetMap) ||
             Object.keys(record.assetMap).length > 502 ||
             Object.entries(record.assetMap).some(([id, file]) =>
-              !id || id.length > 128 || typeof file !== "string" || !file || file.length > 512 || file.includes("\\0")) ||
+              !id || id.length > 128 || typeof file !== "string" || !file || file.length > 512 || file.includes("\0")) ||
             !((record.tenantId === null && record.projectId === null) ||
               (typeof record.tenantId === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(record.tenantId) &&
                typeof record.projectId === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(record.projectId))) {
