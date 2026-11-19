@@ -169,6 +169,17 @@ export function createRenderJobServer({
       const directoryPath = path.join(workRoot, entry.name);
       const directoryInfo = await lstat(directoryPath);
       if (!directoryInfo.isDirectory()) continue;
+      // Remove only our own atomic-write temp filenames left by a hard crash.
+      // Never recurse into arbitrary entries or follow symlinks in the job folder.
+      const jobEntries = await readdir(directoryPath);
+      for (const name of jobEntries) {
+        if (!/^job\\.[0-9a-f-]{36}\\.tmp$/i.test(name)) continue;
+        const temporaryPath = path.join(directoryPath, name);
+        const temporaryInfo = await lstat(temporaryPath);
+        if (temporaryInfo.isFile() || temporaryInfo.isSymbolicLink()) {
+          await rm(temporaryPath, { force: true });
+        }
+      }
       const recordPath = path.join(directoryPath, "job.json");
       let record;
       try {
