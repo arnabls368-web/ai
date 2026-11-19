@@ -153,12 +153,12 @@ function createServer() {
       const auth = getMcpAuthContext()?.props as Props | undefined;
       if (!auth?.accessToken) return { isError: true, content: [{ type: "text", text: "YouTube is not connected. Reconnect your Google account." }] };
       try {
+        const email = auth.email?.trim().toLowerCase();
+        if (!email) throw new Error("The authenticated Google account has no verified email scope.");
+        const ownerDigest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(email));
+        const owner = Array.from(new Uint8Array(ownerDigest), (value) => value.toString(16).padStart(2, "0")).join("");
         let source: Response;
         if (projectId && renderJobId) {
-          const email = auth.email?.trim().toLowerCase();
-          if (!email) throw new Error("The authenticated Google account has no verified email scope.");
-          const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(email));
-          const owner = Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
           const key = "nexus:projects:v1:" + owner + ":" + projectId;
           const project = await env.OAUTH_KV.get<any>(key, "json");
           if (!isVerifiedRenderJob(project, projectId, renderJobId)) throw new Error("The render job was not found as a completed output in a project owned by this Google account.");
@@ -179,7 +179,10 @@ function createServer() {
         }
         if (!source.ok) { const status = source.status; await source.body?.cancel(); throw new Error("Could not retrieve video (HTTP " + status + ")."); }
         const mimeType = (source.headers.get("Content-Type") || "").split(";")[0].trim().toLowerCase();
-        if (mimeType !== "video/mp4" && !(videoUrl && mimeType.startsWith("video/"))) { await source.body?.cancel(); throw new Error("The video source must return a supported video file."); }
+        if (!["video/mp4", "video/quicktime", "video/webm", "video/x-matroska"].includes(mimeType)) {
+          await source.body?.cancel();
+          throw new Error("The video source must return MP4, MOV, WebM, or Matroska content.");
+        }
         const sourceLabel = projectId && renderJobId
           ? "NEXUS render project " + projectId + ", job " + renderJobId
           : "External HTTPS source host " + new URL(videoUrl!).hostname;
