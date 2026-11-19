@@ -229,8 +229,12 @@ export async function getPrivateAssetRange({ tenantId, projectId, assetId, exten
     throw Object.assign(new Error("Requested asset range is not satisfiable."), { status: 416 });
   }
   if (response.status !== 206 || !response.body) {
+    const status = response.status;
     await response.body?.cancel();
-    throw new Error("Private object storage did not return a valid partial response.");
+    throw Object.assign(
+      new Error("Private object storage did not return a valid partial response."),
+      { status },
+    );
   }
   const contentRange = response.headers.get("content-range") ?? "";
   const match = contentRange.match(/^bytes (\d+)-(\d+)\/(\d+)$/);
