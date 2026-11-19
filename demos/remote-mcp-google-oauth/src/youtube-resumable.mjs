@@ -113,6 +113,48 @@ export async function uploadResumableVideo({
 }
 
 
+async function readStagedRangeBytes(range, expectedBytes) {
+  if (!range || range.byteLength !== expectedBytes) {
+    throw new Error("Staged video range returned an invalid body or byte length.");
+  }
+  if (range.body instanceof ArrayBuffer) {
+    if (range.body.byteLength !== expectedBytes) throw new Error("Staged video range body length did not match its metadata.");
+    return new Uint8Array(range.body);
+  }
+  if (range.body instanceof Uint8Array) {
+    if (range.body.byteLength !== expectedBytes) throw new Error("Staged video range body length did not match its metadata.");
+    return range.body;
+  }
+  if (!(range.body instanceof ReadableStream)) {
+    throw new Error("Staged video range returned an unsupported body.");
+  }
+  const reader = range.body.getReader();
+  const chunks = [];
+  let received = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received += value.byteLength;
+      if (received > expectedBytes) {
+        await reader.cancel("Staged range exceeded its declared length.");
+        throw new Error("Staged video range body exceeded its declared length.");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  if (received !== expectedBytes) throw new Error("Staged video range body was shorter than its declared length.");
+  const bytes = new Uint8Array(expectedBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
 const DEFAULT_UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024;
 
 /**
@@ -184,12 +226,9 @@ export async function uploadResumableVideoFromRanges({
       }
 
       const end = Math.min(totalBytes - 1, offset + chunkBytes - 1);
-      const range = await readRange(offset, end);
       const expectedBytes = end - offset + 1;
-      if (!range || range.byteLength !== expectedBytes ||
-          !(range.body instanceof ReadableStream || range.body instanceof ArrayBuffer || range.body instanceof Uint8Array)) {
-        throw new Error("Staged video range returned an invalid body or byte length.");
-      }
+      const range = await readRange(offset, end);
+      const chunkBody = await readStagedRangeBytes(range, expectedBytes);
       const headers = new Headers({
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": mimeType,
@@ -202,7 +241,7 @@ export async function uploadResumableVideoFromRanges({
           redirect: "error",
           signal: AbortSignal.timeout(120_000),
           headers,
-          body: range.body,
+          body: chunkBody,
         });
       } catch (error) {
         lastFailure = error instanceof Error ? error : new Error("Video upload connection failed.");
