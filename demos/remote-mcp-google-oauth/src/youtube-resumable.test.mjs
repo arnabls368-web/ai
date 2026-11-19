@@ -167,3 +167,33 @@ test("does not query or retry a YouTube session when the private range reader fa
   }), /private staging unavailable/);
   assert.equal(requests, 0);
 });
+
+
+test("buffers only the requested bounded stream range before a resumable PUT", async () => {
+  const expected = new Uint8Array([1, 2, 3, 4, 5]);
+  let sent;
+  const response = await uploadResumableVideoFromRanges({
+    uploadUrl: "https://www.googleapis.com/upload/session",
+    totalBytes: expected.byteLength,
+    mimeType: "video/mp4",
+    accessToken: "test-token",
+    chunkBytes: 256 * 1024,
+    readRange: async (start, end) => ({
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(expected.slice(start, Math.min(end + 1, 2)));
+          controller.enqueue(expected.slice(Math.min(end + 1, 2), end + 1));
+          controller.close();
+        },
+      }),
+      byteLength: end - start + 1,
+    }),
+    fetchImpl: async (_url, init) => {
+      sent = init.body;
+      return new Response(JSON.stringify({ id: "video-id" }), { status: 201 });
+    },
+  });
+  assert.equal(response.status, 201);
+  assert.ok(sent instanceof Uint8Array);
+  assert.deepEqual([...sent], [1, 2, 3, 4, 5]);
+});
