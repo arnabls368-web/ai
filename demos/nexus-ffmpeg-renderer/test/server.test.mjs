@@ -899,6 +899,7 @@ test("signed asset-write authorization stores uploaded bytes in private object s
           assetId: "scene-1",
           filename: "scene-1.png",
           bytes: bytes.length,
+          sha256: createHash("sha256").update(bytes).digest("hex"),
           storage: "private_object_storage",
         });
         assert.equal(storedRequest.method, "PUT");
