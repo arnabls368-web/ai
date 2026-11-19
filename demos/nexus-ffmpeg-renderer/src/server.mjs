@@ -381,7 +381,7 @@ export function createRenderJobServer({
               mimeType,
               filePath: uploadPath,
             });
-            return json(response, 201, { assetId: assetMatch[1], filename: assetMatch[1] + stored.extension, bytes: stored.bytes, storage: "private_object_storage" });
+            return json(response, 201, { assetId: assetMatch[1], filename: assetMatch[1] + stored.extension, bytes: stored.bytes, sha256: stored.sha256, storage: "private_object_storage" });
           } finally {
             await rm(uploadDirectory, { recursive: true, force: true });
           }
