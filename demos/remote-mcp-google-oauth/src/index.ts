@@ -82,34 +82,34 @@ async function uploadToYouTube(
     try {
       parsedUploadUrl = new URL(uploadUrl);
     } catch {
-      throw new Error("YouTube returned an invalid resumable upload URL");
+      throw new Error("YouTube returned an invalid resumable upload URL.");
     }
-    if (
-      parsedUploadUrl.protocol !== "https:" ||
-      parsedUploadUrl.hostname !== "www.googleapis.com" ||
-      parsedUploadUrl.port ||
-      parsedUploadUrl.username ||
-      parsedUploadUrl.password ||
-      parsedUploadUrl.hash
-    ) {
-      throw new Error("YouTube returned an untrusted resumable upload URL");
+    if (parsedUploadUrl.protocol !== "https:" ||
+        parsedUploadUrl.hostname !== "www.googleapis.com" ||
+        parsedUploadUrl.port || parsedUploadUrl.username ||
+        parsedUploadUrl.password || parsedUploadUrl.hash) {
+      throw new Error("YouTube returned an unexpected upload URL; refusing to send authorization credentials.");
     }
 
-    return {
-      response: await uploadResumableVideo({
-        uploadUrl: parsedUploadUrl.toString(),
-        accessToken: token,
-        videoBytes,
-        mimeType,
-      }),
-    };
+    const uploaded = await uploadResumableVideo({
+      uploadUrl: parsedUploadUrl.toString(),
+      videoBytes,
+      mimeType,
+      accessToken: token,
+    });
+    return { response: uploaded };
   };
 
   let result = await startUpload(initialAccessToken);
   if (result.response.status === 401 && refreshToken) {
     await result.response.body?.cancel();
-    const refreshed = await refreshGoogleAccessToken(refreshToken);
-    result = await startUpload(refreshed.access_token);
+    const renewed = await refreshGoogleAccessToken(
+      refreshToken,
+      env.GOOGLE_CLIENT_ID,
+      env.GOOGLE_CLIENT_SECRET,
+    );
+    if (!renewed) throw new Error("Google authorization expired. Please reconnect YouTube.");
+    result = await startUpload(renewed);
   }
   if (!result.response.ok) {
     const status = result.response.status;
