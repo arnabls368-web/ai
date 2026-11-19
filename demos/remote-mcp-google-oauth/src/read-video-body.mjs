@@ -11,9 +11,9 @@ export const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
  * Chunked responses remain bounded but currently use a chunk list followed
  * by a final allocation; staging is required to eliminate that fallback copy.
  */
-export async function readVideoBodyBounded(response: Response): Promise<ArrayBuffer> {
+export async function readVideoBodyBounded(response) {
   const declaredLength = response.headers.get("Content-Length");
-  let expectedLength: number | null = null;
+  let expectedLength = null;
   if (declaredLength !== null) {
     expectedLength = Number(declaredLength);
     if (!Number.isSafeInteger(expectedLength) || expectedLength < 0) {
