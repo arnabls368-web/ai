@@ -226,6 +226,9 @@ function createServer() {
           "SHA-256",
           new TextEncoder().encode(serializeApprovalBinding([
             auth.email.trim().toLowerCase(),
+            sourceLabel,
+            mimeType,
+            String(videoBytes.byteLength),
             videoSha256,
             title,
             description || "",
