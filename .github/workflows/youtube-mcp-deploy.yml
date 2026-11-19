@@ -62,7 +62,7 @@ jobs:
 
       - name: Deploy Worker with the lockfile-pinned Wrangler
         if: steps.credentials.outputs.configured == 'true'
-        working-directory: .
+        # Use the Worker package directory so Wrangler loads its wrangler.jsonc.
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: 0f115e51541a996bc777725456d89e11
