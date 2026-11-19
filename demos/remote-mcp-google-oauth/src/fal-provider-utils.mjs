@@ -51,3 +51,26 @@ export async function tryPersistFalCompletion(kv, key, job, completedAt) {
     return { persisted: false };
   }
 }
+
+/**
+ * Rebuild fal queue URLs from the endpoint and request ID when the initial
+ * account-scoped KV write failed. The endpoint is validated before path use.
+ */
+export function recoverFalJobRecord(endpointId, requestId, createdAt = "") {
+  if (typeof endpointId !== "string" ||
+      endpointId.length > 200 ||
+      !/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*){1,4}$/i.test(endpointId) ||
+      typeof requestId !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+    throw new Error("A valid fal.ai endpoint ID and request ID are required for recovery.");
+  }
+  const base = "https://queue.fal.run/" + endpointId + "/requests/" + requestId;
+  return {
+    endpointId,
+    requestId,
+    statusUrl: trustedFalUrl(base + "/status"),
+    responseUrl: trustedFalUrl(base),
+    cancelUrl: trustedFalUrl(base + "/cancel"),
+    createdAt,
+  };
+}
