@@ -586,6 +586,49 @@ test("paginates staged object listings with safely encoded continuation tokens",
   }
 });
 
+test("caps staged cleanup work and reports when another page or delete remains", async () => {
+  const keys = ["AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION"];
+  const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  const originalFetch = globalThis.fetch;
+  const now = Date.parse("2026-11-19T04:00:00.000Z");
+  const oldA = "staged-assets/tenant/project/" + "a".repeat(64) + ".mp4";
+  const oldB = "staged-assets/tenant/project/" + "b".repeat(64) + ".webm";
+  const listing = (entries, truncated) =>
+    "<ListBucketResult><IsTruncated>" + truncated + "</IsTruncated>" +
+    entries.map((key) => "<Contents><Key>" + key + "</Key><LastModified>2026-11-18T00:00:00.000Z</LastModified></Contents>").join("") +
+    (truncated ? "<NextContinuationToken>next</NextContinuationToken>" : "") +
+    "</ListBucketResult>";
+  let deleteCount = 0;
+  try {
+    process.env.AWS_ENDPOINT_URL = "https://objects.example.test";
+    process.env.AWS_S3_BUCKET_NAME = "nexus-private";
+    process.env.AWS_ACCESS_KEY_ID = "test-access";
+    process.env.AWS_SECRET_ACCESS_KEY = "test-secret";
+    process.env.AWS_DEFAULT_REGION = "auto";
+    const { cleanupStagedAssets } = await import("../src/storage.mjs");
+    globalThis.fetch = async (_url, init) => new Response(listing([], true));
+    const pageLimited = await cleanupStagedAssets({ maxPages: 1, now });
+    assert.deepEqual(pageLimited, { scanned: 0, deleted: 0, pages: 1, truncated: true });
+
+    globalThis.fetch = async (_url, init) => {
+      if (init.method === "DELETE") {
+        deleteCount += 1;
+        return new Response(null, { status: 204 });
+      }
+      return new Response(listing([oldA, oldB], false));
+    };
+    const deleteLimited = await cleanupStagedAssets({ maxDeletes: 1, now });
+    assert.deepEqual(deleteLimited, { scanned: 1, deleted: 1, pages: 1, truncated: true });
+    assert.equal(deleteCount, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
 test("rejects private object keys outside the permanent and staging namespaces", async () => {
   const { deletePrivateAsset } = await import("../src/storage.mjs");
   await assert.rejects(deletePrivateAsset({
