@@ -18,3 +18,7 @@ export function isVerifiedRenderJob(project, projectId, renderJobId) {
     record.renderJob?.status === "succeeded" &&
     record.renderJob?.outputUrl === `/jobs/${renderJobId}/output`;
 }
+/** Upload sources must return a complete representation, never a partial range. */
+export function isCompleteUploadSourceResponse(status) {
+  return status === 200;
+}
