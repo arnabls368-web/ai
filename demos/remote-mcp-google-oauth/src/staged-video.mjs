@@ -36,7 +36,7 @@ export async function stageVideoSource({ source, mimeType, callRenderer, assetId
     response = await callRenderer({
       method: "PUT",
       scope: "asset:write",
-      path: "/assets/" + assetId,
+      path: "/staged-assets/" + assetId,
       rawBody: source.body,
       contentType: mimeType,
     });
@@ -109,7 +109,7 @@ export function createStagedVideoRangeReader({ assetId, extension, totalBytes, c
     const response = await callRenderer({
       method: "GET",
       scope: "asset:read",
-      path: "/assets/" + assetId + "/" + extension,
+      path: "/staged-assets/" + assetId + "/" + extension,
       range: "bytes=" + start + "-" + end,
     });
     const expectedLength = end - start + 1;
