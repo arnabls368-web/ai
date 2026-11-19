@@ -379,7 +379,9 @@ export function createRenderJobServer({
       if (isAssetUpload) {
         if (claims.legacy || !claims.tenantId || !claims.projectId) return json(response, 401, { error: "signed project authorization required" });
         const mimeType = String(request.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
-        if (!extensionForMime(mimeType)) return json(response, 415, { error: "unsupported asset media type" });
+        if (!extensionForMime(mimeType) || (isStagedAssetUpload && !mimeType.startsWith("video/"))) {
+          return json(response, 415, { error: "unsupported asset media type" });
+        }
         if (activeAssetUploads >= MAX_CONCURRENT_ASSET_UPLOADS) {
           response.shouldKeepAlive = false;
           return json(response, 429, { error: "asset upload capacity is full" });
