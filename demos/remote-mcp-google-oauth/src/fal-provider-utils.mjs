@@ -36,3 +36,18 @@ export function validateFalJobRecord(job, expectedRequestId) {
     createdAt: typeof job.createdAt === "string" ? job.createdAt : "",
   };
 }
+
+/**
+ * Persist completion metadata without hiding an already retrieved provider output.
+ * A KV outage must not turn a successful generation into an apparent provider failure.
+ */
+export async function tryPersistFalCompletion(kv, key, job, completedAt) {
+  try {
+    await kv.put(key, JSON.stringify({ ...job, completedAt, completed: true }), {
+      expirationTtl: 60 * 60 * 24 * 7,
+    });
+    return { persisted: true };
+  } catch {
+    return { persisted: false };
+  }
+}
