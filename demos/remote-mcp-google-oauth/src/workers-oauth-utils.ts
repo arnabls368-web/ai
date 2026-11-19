@@ -1,3 +1,6 @@
+import { signAuthorizationState, verifyAuthorizationState } from "./authorization-state.mjs";
+export { signAuthorizationState, verifyAuthorizationState };
+
 // workers-oauth-utils.ts
 // OAuth utility functions with CSRF and state validation security fixes
 
@@ -809,51 +812,6 @@ async function getApprovedClientsFromCookie(
 		}
 		return approvedClients as string[];
 	} catch (_e) {
-		return null;
-	}
-}
-
-/**
- * Signs approval-form state so the browser cannot alter the OAuth request
- * between the authorization screen and the approval POST.
- */
-export async function signAuthorizationState(
-	state: Record<string, unknown>,
-	secret: string,
-): Promise<string> {
-	const payload = JSON.stringify(state);
-	const bytes = new TextEncoder().encode(payload);
-	if (bytes.byteLength > 32_768) {
-		throw new Error("OAuth approval state is too large.");
-	}
-	let binary = "";
-	for (const byte of bytes) binary += String.fromCharCode(byte);
-	const signature = await signData(payload, secret);
-	return signature + "." + btoa(binary);
-}
-
-/** Verify and decode the exact approval state rendered by the server. */
-export async function verifyAuthorizationState(
-	encodedState: string,
-	secret: string,
-): Promise<Record<string, unknown> | null> {
-	if (typeof encodedState !== "string" || encodedState.length > 44_000) return null;
-	const parts = encodedState.split(".");
-	if (parts.length !== 2 || !/^[0-9a-f]{64}$/.test(parts[0])) return null;
-	let payload: string;
-	try {
-		const binary = atob(parts[1]);
-		const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-		payload = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-	} catch {
-		return null;
-	}
-	if (!(await verifySignature(parts[0], payload, secret))) return null;
-	try {
-		const value: unknown = JSON.parse(payload);
-		if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-		return value as Record<string, unknown>;
-	} catch {
 		return null;
 	}
 }
