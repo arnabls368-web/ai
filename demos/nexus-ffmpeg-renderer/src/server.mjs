@@ -10,6 +10,7 @@ import { renderManifest, validateManifest } from "./renderer.mjs";
 import { verifyRenderToken } from "./auth.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024;
+const MAX_VIDEO_ASSET_BYTES = 50 * 1024 * 1024;
 const MAX_RETAINED_JOBS = 100;
 const MAX_QUEUE_SIZE = 3;
 const MAX_CONCURRENT_ASSET_UPLOADS = 2;
@@ -373,7 +374,7 @@ export function createRenderJobServer({
           const uploadDirectory = await mkdtemp(path.join(assetTempRoot, "nexus-asset-upload-"));
           const uploadPath = path.join(uploadDirectory, "asset");
           try {
-            await writeBinaryLimited(request, uploadPath);
+            await writeBinaryLimited(request, uploadPath, mimeType.startsWith("video/") ? MAX_VIDEO_ASSET_BYTES : MAX_ASSET_BYTES_LIMIT);
             const stored = await putPrivateAssetFile({
               tenantId: claims.tenantId,
               projectId: claims.projectId,
