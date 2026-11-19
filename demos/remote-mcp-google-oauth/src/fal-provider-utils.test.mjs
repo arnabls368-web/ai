@@ -112,7 +112,7 @@ test("rejects invalid endpoint IDs and request IDs during fal job recovery", () 
     ["https://attacker.example", "019a1b2c-3d4e-7f80-9a1b-2c3d4e5f6a7b"],
     ["../attacker", "019a1b2c-3d4e-7f80-9a1b-2c3d4e5f6a7b"],
     ["blackforestlabs/flux-3-max", "not-a-uuid"],
-    ["blackforestlabs/flux-3-max", "019a1b2c-3d4e-7f80-9a1b-2c3d4e5f6a7c"],
+    ["blackforestlabs/flux-3-max", "019a1b2c-3d4e-7f80-7a1b-2c3d4e5f6a7b"],
   ]) {
     assert.throws(() => recoverFalJobRecord(endpointId, requestId), /valid fal.ai endpoint ID and request ID/);
   }
