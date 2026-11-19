@@ -4,6 +4,12 @@ on:
   # Production deployment is deliberately manual; pushes and PRs must never
   # publish a Worker without an explicit operator action.
   workflow_dispatch:
+    inputs:
+      confirm_production_deploy:
+        description: "I explicitly approve deploying the reviewed NEXUS Worker to production"
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   contents: read
@@ -12,7 +18,7 @@ jobs:
   deploy:
     # workflow_dispatch can be launched against a selected ref. Restrict the
     # production credential-bearing job to the default branch.
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && inputs.confirm_production_deploy == true
     runs-on: ubuntu-latest
     defaults:
       run:
