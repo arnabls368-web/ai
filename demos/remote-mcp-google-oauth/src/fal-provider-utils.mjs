@@ -27,12 +27,24 @@ export function validateFalJobRecord(job, expectedRequestId) {
       (job.cancelUrl !== undefined && typeof job.cancelUrl !== "string")) {
     throw new Error("The saved fal.ai job record is invalid; refusing to contact the provider.");
   }
+  // A trusted hostname alone is insufficient: bind every provider URL to
+  // this exact owner/app queue path and request ID before attaching FAL_KEY.
+  const modelId = job.endpointId.split("/").slice(0, 2).join("/");
+  const basePath = "/" + modelId + "/requests/" + expectedRequestId;
+  const statusUrl = trustedFalUrl(job.statusUrl);
+  const responseUrl = trustedFalUrl(job.responseUrl);
+  const cancelUrl = job.cancelUrl === undefined ? undefined : trustedFalUrl(job.cancelUrl);
+  if (new URL(statusUrl).pathname !== basePath + "/status" ||
+      new URL(responseUrl).pathname !== basePath ||
+      (cancelUrl !== undefined && new URL(cancelUrl).pathname !== basePath + "/cancel")) {
+    throw new Error("The saved fal.ai job URL does not match its endpoint and request ID; refusing to contact the provider.");
+  }
   return {
     endpointId: job.endpointId,
     requestId: job.requestId,
-    statusUrl: trustedFalUrl(job.statusUrl),
-    responseUrl: trustedFalUrl(job.responseUrl),
-    ...(job.cancelUrl === undefined ? {} : { cancelUrl: trustedFalUrl(job.cancelUrl) }),
+    statusUrl,
+    responseUrl,
+    ...(cancelUrl === undefined ? {} : { cancelUrl }),
     createdAt: typeof job.createdAt === "string" ? job.createdAt : "",
   };
 }
