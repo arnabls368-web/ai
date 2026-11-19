@@ -23,6 +23,25 @@ export type Props = {
   refreshToken?: string;
 };
 
+const uploadApprovalSchema = z.object({
+  confirm: z.boolean().meta({ title: "I approve this exact private YouTube upload" }),
+});
+const uploadApprovalWireSchema = {
+  type: "object",
+  properties: {
+    confirm: { type: "boolean", title: "I approve this exact private YouTube upload" },
+  },
+  required: ["confirm"],
+  additionalProperties: false,
+};
+const humanApprovalApi = {
+  inputResponse,
+  acceptedContent,
+  inputRequired,
+  approvalSchema: uploadApprovalSchema,
+  approvalWireSchema: uploadApprovalWireSchema,
+};
+
 async function uploadToYouTube(
   videoBytes: ArrayBuffer,
   mimeType: string,
@@ -63,34 +82,34 @@ async function uploadToYouTube(
     try {
       parsedUploadUrl = new URL(uploadUrl);
     } catch {
-      throw new Error("YouTube returned an invalid resumable upload URL.");
+      throw new Error("YouTube returned an invalid resumable upload URL");
     }
-    if (parsedUploadUrl.protocol !== "https:" ||
-        parsedUploadUrl.hostname !== "www.googleapis.com" ||
-        parsedUploadUrl.port || parsedUploadUrl.username ||
-        parsedUploadUrl.password || parsedUploadUrl.hash) {
-      throw new Error("YouTube returned an unexpected upload URL; refusing to send authorization credentials.");
+    if (
+      parsedUploadUrl.protocol !== "https:" ||
+      parsedUploadUrl.hostname !== "www.googleapis.com" ||
+      parsedUploadUrl.port ||
+      parsedUploadUrl.username ||
+      parsedUploadUrl.password ||
+      parsedUploadUrl.hash
+    ) {
+      throw new Error("YouTube returned an untrusted resumable upload URL");
     }
 
-    const uploaded = await uploadResumableVideo({
-      uploadUrl: parsedUploadUrl.toString(),
-      videoBytes,
-      mimeType,
-      accessToken: token,
-    });
-    return { response: uploaded };
+    return {
+      response: await uploadResumableVideo({
+        uploadUrl: parsedUploadUrl.toString(),
+        accessToken: token,
+        videoBytes,
+        mimeType,
+      }),
+    };
   };
 
   let result = await startUpload(initialAccessToken);
   if (result.response.status === 401 && refreshToken) {
     await result.response.body?.cancel();
-    const renewed = await refreshGoogleAccessToken(
-      refreshToken,
-      env.GOOGLE_CLIENT_ID,
-      env.GOOGLE_CLIENT_SECRET,
-    );
-    if (!renewed) throw new Error("Google authorization expired. Please reconnect YouTube.");
-    result = await startUpload(renewed);
+    const refreshed = await refreshGoogleAccessToken(refreshToken);
+    result = await startUpload(refreshed.access_token);
   }
   if (!result.response.ok) {
     const status = result.response.status;
@@ -217,17 +236,3 @@ function createServer() {
 }
 
 const mcpHandler = createMcpHandler(createServer);
-
-export default new OAuthProvider<Env>({
-  apiHandler: {
-    fetch(request: Request, env: Env, ctx: ExecutionContext) {
-      return mcpHandler(request, env, ctx);
-    },
-  },
-  apiRoute: "/mcp",
-  authorizeEndpoint: "/authorize",
-  clientRegistrationEndpoint: "/register",
-  defaultHandler: GoogleHandler as any,
-  tokenEndpoint: "/token",
-  resourceMetadata: { resource: env.MCP_RESOURCE },
-});
