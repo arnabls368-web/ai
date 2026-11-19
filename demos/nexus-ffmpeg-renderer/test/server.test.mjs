@@ -1168,3 +1168,47 @@ test("staged asset deletion requires asset:delete scope and deletes only the sig
     }
   });
 });
+
+
+test("runs the staged-object cleanup sweep at startup and stops its timer on shutdown", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const previousBucket = process.env.AWS_S3_BUCKET_NAME;
+    process.env.AWS_S3_BUCKET_NAME = "nexus-private";
+    let calls = 0;
+    const server = createRenderJobServer({
+      token: "",
+      signingSecret: SIGNING_SECRET,
+      assetRoot: path.join(workRoot, "assets"),
+      workRoot,
+      cleanupEnabled: true,
+      cleanupIntervalMs: 15 * 60 * 1000,
+      cleanupFn: async () => {
+        calls += 1;
+        return { scanned: 2, deleted: 1, pages: 1, truncated: false };
+      },
+    });
+    try {
+      await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+      for (let attempt = 0; attempt < 100 && calls === 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      assert.equal(calls, 1);
+    } finally {
+      await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+      if (previousBucket === undefined) delete process.env.AWS_S3_BUCKET_NAME;
+      else process.env.AWS_S3_BUCKET_NAME = previousBucket;
+    }
+  });
+});
+
+test("rejects unsafe staged cleanup scheduler intervals", async () => {
+  await withWorkRoot(async (workRoot) => {
+    assert.throws(() => createRenderJobServer({
+      token: "",
+      signingSecret: SIGNING_SECRET,
+      workRoot,
+      cleanupEnabled: true,
+      cleanupIntervalMs: 1000,
+    }), /at least 15 minutes/);
+  });
+});
