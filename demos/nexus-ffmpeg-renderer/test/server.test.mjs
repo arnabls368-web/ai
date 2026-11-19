@@ -918,8 +918,9 @@ test("signed asset-write authorization stores uploaded bytes in private object s
           },
           body: stagedBytes,
         });
-        assert.equal(stagedResponse.status, 201);
-        assert.equal((await stagedResponse.json()).filename, "video-1.mp4");
+        const stagedResult = await stagedResponse.json();
+        assert.equal(stagedResponse.status, 201, JSON.stringify(stagedResult));
+        assert.equal(stagedResult.filename, "video-1.mp4");
         assert.equal(storedRequest.method, "PUT");
         assert.deepEqual(storedRequest.body, stagedBytes);
         assert.ok(storedRequest.url.startsWith("https://nexus-private.objects.example.test/staged-assets/tenant-a/project-1/"));
