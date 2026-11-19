@@ -393,8 +393,9 @@ export function createRenderJobServer({
             const stored = await putPrivateAssetFile({
               tenantId: claims.tenantId,
               projectId: claims.projectId,
-              assetId: assetMatch[1],
+              assetId: (stagedAssetMatch ?? assetMatch)[1],
               mimeType,
+              ...(isStagedAssetUpload ? { prefix: "staged-assets" } : {}),
               filePath: uploadPath,
             });
             return json(response, 201, { assetId: assetMatch[1], filename: assetMatch[1] + stored.extension, bytes: stored.bytes, sha256: stored.sha256, storage: "private_object_storage" });
