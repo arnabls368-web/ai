@@ -51,3 +51,57 @@ test("private renderer calls reject insecure bases, traversal and scope-method m
   await assert.rejects(callPrivateRenderer({ ...base, method: "POST" }), /method or body does not match/);
 });
 
+
+test("private asset range reads use a dedicated signed scope and Range header", async () => {
+  const originalFetch = globalThis.fetch;
+  let captured;
+  try {
+    globalThis.fetch = async (url, init) => {
+      captured = { url: String(url), init };
+      return new Response(new Uint8Array([1, 2, 3, 4]), {
+        status: 206,
+        headers: { "content-range": "bytes 0-3/10", "content-length": "4" },
+      });
+    };
+    const response = await callPrivateRenderer({
+      baseUrl: "https://renderer.example",
+      secret,
+      tenantId: "tenant",
+      projectId: "project",
+      scope: "asset:read",
+      path: "/assets/asset-123/mp4",
+      method: "GET",
+      range: "bytes=0-3",
+    });
+    assert.equal(response.status, 206);
+    assert.equal(captured.url, "https://renderer.example/assets/asset-123/mp4");
+    assert.equal(captured.init.headers.get("range"), "bytes=0-3");
+    const token = captured.init.headers.get("authorization").slice("Bearer ".length);
+    const claims = verifyRenderToken(token, { secret, scope: "asset:read" });
+    assert.equal(claims.projectId, "project");
+    assert.equal(claims.tenantId, "tenant");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("private asset range reads reject malformed range headers before network access", async () => {
+  const originalFetch = globalThis.fetch;
+  let called = false;
+  try {
+    globalThis.fetch = async () => { called = true; return new Response(null); };
+    await assert.rejects(callPrivateRenderer({
+      baseUrl: "https://renderer.example",
+      secret,
+      tenantId: "tenant",
+      projectId: "project",
+      scope: "asset:read",
+      path: "/assets/asset-123/mp4",
+      method: "GET",
+      range: "bytes=0-3,5-8",
+    }), /method or body does not match/);
+    assert.equal(called, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
