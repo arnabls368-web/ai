@@ -1070,15 +1070,15 @@ test("staged asset range reads require the dedicated signed asset:read scope", a
   await withWorkRoot(async (workRoot) => {
     const instance = await startSignedServer(workRoot);
     try {
-      const noAuth = await fetch(`${instance.base}/assets/video-1/mp4`, {
+      const noAuth = await fetch(`${instance.base}/staged-assets/video-1/mp4`, {
         headers: { range: "bytes=0-2" },
       });
       assert.equal(noAuth.status, 401);
-      const wrongScope = await fetch(`${instance.base}/assets/video-1/mp4`, {
+      const wrongScope = await fetch(`${instance.base}/staged-assets/video-1/mp4`, {
         headers: { ...signedHeader("tenant-a", "project-a", "render:read"), range: "bytes=0-2" },
       });
       assert.equal(wrongScope.status, 401);
-      const invalidRange = await fetch(`${instance.base}/assets/video-1/mp4`, {
+      const invalidRange = await fetch(`${instance.base}/staged-assets/video-1/mp4`, {
         headers: { ...signedHeader("tenant-a", "project-a", "asset:read"), range: "bytes=0-" },
       });
       assert.equal(invalidRange.status, 400);
@@ -1114,7 +1114,7 @@ test("staged asset deletion requires asset:delete scope and deletes only the sig
           "tenant-cleanup",
         );
         const result = await new Promise((resolve, reject) => {
-          const req = httpRequest(instance.base + "/assets/asset-123/mp4", {
+          const req = httpRequest(instance.base + "/staged-assets/asset-123/mp4", {
             method: "DELETE",
             headers: { authorization: token },
           }, (response) => {
@@ -1129,7 +1129,7 @@ test("staged asset deletion requires asset:delete scope and deletes only the sig
         assert.equal(result.status, 200);
         assert.deepEqual(JSON.parse(result.body), { deleted: true });
         assert.equal(storageRequest.method, "DELETE");
-        assert.match(storageRequest.url, /assets\/tenant-cleanup\/project-cleanup\//);
+        assert.match(storageRequest.url, /staged-assets\/tenant-cleanup\/project-cleanup\//);
         assert.match(storageRequest.authorization, /^AWS4-HMAC-SHA256/);
       } finally {
         await instance.close();
