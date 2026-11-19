@@ -92,6 +92,7 @@ export async function callPrivateRenderer({
   body?: unknown;
   rawBody?: ArrayBuffer | ReadableStream<Uint8Array>;
   contentType?: string;
+  range?: string;
 }): Promise<Response> {
   const base = new URL(baseUrl);
   if (base.protocol !== "https:" || base.username || base.password || base.search || base.hash || base.pathname !== "/") {
