@@ -11,6 +11,8 @@ import {
 	renderApprovalDialog,
 	validateCSRFToken,
 	validateOAuthState,
+	signAuthorizationState,
+	verifyAuthorizationState,
 } from "./workers-oauth-utils";
 
 const app = new Hono<{ Bindings: Env & { OAUTH_PROVIDER: OAuthHelpers } }>();
@@ -57,6 +59,10 @@ app.get("/authorize", async (c) => {
 	// Generate CSRF protection for the approval form
 	const { token: csrfToken, setCookie } = generateCSRFProtection();
 
+	const encodedState = await signAuthorizationState(
+		{ oauthReqInfo },
+		c.env.COOKIE_ENCRYPTION_KEY,
+	);
 	return renderApprovalDialog(c.req.raw, {
 		client: await c.env.OAUTH_PROVIDER.lookupClient(clientId),
 		csrfToken,
@@ -65,7 +71,7 @@ app.get("/authorize", async (c) => {
 			name: "NEXUS Universe YouTube MCP",
 		},
 		setCookie,
-		state: { oauthReqInfo },
+		encodedState,
 	});
 });
 
@@ -83,26 +89,26 @@ app.post("/authorize", async (c) => {
 			return c.text("Missing state in form data", 400);
 		}
 
-		let state: { oauthReqInfo?: AuthRequest };
-		try {
-			state = JSON.parse(atob(encodedState));
-		} catch (_e) {
-			return c.text("Invalid state data", 400);
-		}
-
-		if (!state.oauthReqInfo || !state.oauthReqInfo.clientId) {
+		const state = await verifyAuthorizationState(
+			encodedState,
+			c.env.COOKIE_ENCRYPTION_KEY,
+		);
+		if (!state) return c.text("Invalid or modified authorization state", 400);
+		const oauthReqInfo = state.oauthReqInfo as AuthRequest | undefined;
+		if (!oauthReqInfo || typeof oauthReqInfo !== "object" ||
+			typeof oauthReqInfo.clientId !== "string" || !oauthReqInfo.clientId) {
 			return c.text("Invalid request", 400);
 		}
 
 		// Add client to approved list
 		const approvedClientCookie = await addApprovedClient(
 			c.req.raw,
-			state.oauthReqInfo.clientId,
+			oauthReqInfo.clientId,
 			c.env.COOKIE_ENCRYPTION_KEY,
 		);
 
 		// Create OAuth state and bind it to this user's session
-		const { stateToken } = await createOAuthState(state.oauthReqInfo, c.env.OAUTH_STATE);
+		const { stateToken } = await createOAuthState(oauthReqInfo, c.env.OAUTH_STATE);
 		const { setCookie: sessionBindingCookie } = await bindStateToSession(stateToken);
 
 		// Set both cookies: approved client list + session binding
