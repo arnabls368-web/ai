@@ -3,7 +3,7 @@ import { z } from "zod";
 import { env } from "cloudflare:workers";
 import { getMcpAuthContext } from "agents/mcp/server";
 import { readJsonLimited } from "./utils";
-import { isFalGenerationFailed } from "./fal-status.mjs";
+import { classifyFalGenerationStatus } from "./fal-status.mjs";
 import { trustedFalUrl, validateFalJobRecord } from "./fal-provider-utils.mjs";
 import { normalizeFalModelCatalogue, normalizeFalPricing } from "./fal-catalog-utils.mjs";
 import { buildFalCostEstimateRequest, normalizeFalCostEstimate } from "./fal-cost-estimate.mjs";
@@ -333,11 +333,15 @@ export function registerProviderTools(server: McpServer) {
         // fal.ai can report FAILED with an error payload. Handle terminal
         // failures before the generic non-COMPLETED branch so diagnostics are
         // not accidentally presented as a job that is still running.
-        if (isFalGenerationFailed(status)) {
+        const lifecycle = classifyFalGenerationStatus(status);
+        if (lifecycle === "failed") {
           return result({ status: "FAILED", requestId, error: status.error, errorType: status.error_type });
         }
-        if (status.status !== "COMPLETED") {
+        if (lifecycle === "pending") {
           return result({ status: status.status, requestId, queuePosition: status.queue_position, logs: status.logs ?? [], note: "The same job is still running. Poll this request ID again later." });
+        }
+        if (lifecycle !== "completed") {
+          throw new Error("fal.ai returned an unknown generation status; refusing to treat it as still running.");
         }
         const output = await providerJson(responseUrl, {
           headers: { Authorization: `Key ${apiKey}` },
