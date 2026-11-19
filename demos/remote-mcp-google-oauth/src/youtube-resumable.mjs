@@ -180,12 +180,48 @@ export async function uploadResumableVideoFromRanges({
   }
 
   let offset = 0;
-  let checkSession = checkStatusFirst;
-  let allowPreviouslyAcceptedProgress = checkStatusFirst;
+  if (checkStatusFirst) {
+    let status;
+    let lastFailure;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      try {
+        status = await fetchImpl(uploadUrl, {
+          method: "PUT",
+          redirect: "error",
+          signal: AbortSignal.timeout(30_000),
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Range": `bytes */${totalBytes}`,
+          },
+          body: new ArrayBuffer(0),
+        });
+        break;
+      } catch (error) {
+        lastFailure = error;
+      }
+    }
+    if (!status) {
+      throw new Error(lastFailure instanceof Error
+        ? `YouTube upload status check failed: ${lastFailure.message}`
+        : "YouTube upload status check failed.");
+    }
+    if (status.status === 308) {
+      offset = nextUploadOffset(status.headers.get("Range"), totalBytes);
+      await status.body?.cancel();
+      if (offset >= totalBytes) {
+        throw new Error("YouTube reported an incomplete upload after acknowledging every byte.");
+      }
+    } else if (status.ok || status.status < 500) {
+      return status;
+    } else {
+      const code = status.status;
+      await status.body?.cancel();
+      throw new Error(`YouTube upload status check temporarily failed (HTTP ${code}).`);
+    }
+  }
   while (offset < totalBytes) {
     let lastFailure;
-    let mustCheckStatus = checkSession;
-    checkSession = false;
+    let mustCheckStatus = false;
     let advanced = false;
     let lastSentEnd = offset - 1;
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
@@ -207,12 +243,11 @@ export async function uploadResumableVideoFromRanges({
               await status.body?.cancel();
               throw new Error("YouTube resumable-upload progress moved backwards.");
             }
-            if (acknowledged > lastSentEnd + 1 && !allowPreviouslyAcceptedProgress) {
+            if (acknowledged > lastSentEnd + 1) {
               await status.body?.cancel();
               throw new Error("YouTube acknowledged bytes beyond the submitted chunk.");
             }
             await status.body?.cancel();
-            allowPreviouslyAcceptedProgress = false;
             if (acknowledged >= totalBytes) {
               throw new Error("YouTube reported an incomplete upload after acknowledging every byte.");
             }
