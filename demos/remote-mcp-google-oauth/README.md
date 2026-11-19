@@ -42,7 +42,7 @@ The following live-provider workflows have **not** yet been proven end to end:
 - A real render job that retrieves private objects, creates an MP4, and returns it through the signed output route.
 - Recovery of a real job/output across a Railway container restart.
 - A complete authenticated Google OAuth and YouTube upload test.
-- Configure and verify an S3-compatible bucket lifecycle expiry for staged video objects. Explicit deletion is attempted after approval decline, upload completion or failure; lifecycle expiry is the crash/retry safety net.
+- Implement and schedule a crash-safe staged-object cleanup sweep. Railway Buckets do not currently support lifecycle configuration, so automatic prefix expiry cannot be configured on the existing bucket. Explicit deletion is attempted on normal success/failure paths, but a process crash can leave temporary objects behind.
 
 A healthy `/health` endpoint proves process liveness only. It does not prove storage access, rendering, output retrieval, OAuth, or YouTube upload.
 
@@ -81,6 +81,9 @@ The Worker is named `phn-youtube-mcp`. Its Wrangler configuration declares:
 - Secret bindings including `COOKIE_ENCRYPTION_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `EXA_API_KEY`, `FAL_KEY`, and renderer signing/configuration values.
 
 Keep secret values in Cloudflare's secret store. Never put them in source code, GitHub commits, logs or chat.
+
+**Live deployment gate:** the current Cloudflare Worker deployment has not yet been migrated to bind the `OAUTH_STATE` Durable Object declared above. The OAuth state flow must not be considered production-ready until the `v1` SQLite Durable Object migration and binding are deployed and verified. That migration is intentionally not performed as part of ordinary code development.
+
 
 Google OAuth requests these scopes:
 
