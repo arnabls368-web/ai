@@ -11,7 +11,7 @@ NEXUS is a remote MCP server for planning and coordinating a YouTube video-produ
 | Planning | `nexus_plan_video`, `nexus_create_storyboard`, `nexus_build_publish_package` | Creates briefs, timed scene plans and metadata drafts; does not itself generate media |
 | Projects | `nexus_create_project`, `nexus_list_projects`, `nexus_get_project`, `nexus_update_project`, `nexus_update_project_stage` | Google-account-scoped records in Cloudflare KV; KV is eventually consistent |
 | Research | `nexus_research_web` | Exa-backed research; requires `EXA_API_KEY` |
-| Media generation | `nexus_submit_media_generation`, `nexus_get_media_generation` | fal.ai-backed; requires `FAL_KEY`; every paid generation requires explicit per-operation approval |
+| Media generation | `nexus_search_media_models`, `nexus_get_media_model_pricing`, `nexus_submit_media_generation`, `nexus_get_media_generation` | Live fal.ai model discovery (including optional input schemas) and pricing lookup are read-only; generation requires `FAL_KEY` and explicit per-operation approval |
 | Renderer | `nexus_create_render_manifest`, `nexus_check_renderer_connection`, `nexus_transfer_render_asset`, `nexus_submit_render`, `nexus_get_render_status` | Transfers approved assets to private object storage and submits jobs to the separate FFmpeg service; live end-to-end provider verification remains outstanding |
 | Channel insights | `youtube_get_channel_overview`, `youtube_list_recent_videos`, `youtube_get_channel_analytics` | Requires Google OAuth and the corresponding YouTube API scopes |
 | Upload | `youtube_upload_video` | Private only; maximum 50 MiB; interactive approval for each exact upload |
