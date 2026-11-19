@@ -97,3 +97,22 @@ export function createStagedVideoRangeReader({ assetId, extension, totalBytes, c
     return { body: response.body, byteLength: contentLength };
   };
 }
+
+
+/** Best-effort explicit cleanup; bucket lifecycle expiry remains the crash-safety backstop. */
+export async function deleteStagedVideoAsset({ assetId, extension, callRenderer }) {
+  if (!VIDEO_EXTENSIONS.has(extension) || typeof callRenderer !== "function") {
+    throw new Error("Invalid staged video cleanup configuration.");
+  }
+  const response = await callRenderer({
+    method: "DELETE",
+    scope: "asset:delete",
+    path: "/assets/" + assetId + "/" + extension,
+  });
+  if (!response.ok) {
+    const status = response.status;
+    await response.body?.cancel();
+    throw new Error("Private renderer could not clean up staged video (HTTP " + status + ").");
+  }
+  await response.body?.cancel();
+}
