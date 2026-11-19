@@ -20,6 +20,7 @@ export function validateFalJobRecord(job, expectedRequestId) {
   if (!job || typeof job !== "object" || Array.isArray(job) ||
       job.requestId !== expectedRequestId ||
       typeof job.endpointId !== "string" ||
+      job.endpointId.length > 200 ||
       !/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*){1,4}$/i.test(job.endpointId) ||
       typeof job.statusUrl !== "string" ||
       typeof job.responseUrl !== "string") {
