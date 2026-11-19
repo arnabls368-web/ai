@@ -301,7 +301,7 @@ export async function cleanupStagedAssets({
       const timestamp = modified ? Date.parse(modified) : NaN;
       scanned += 1;
       if (!key ||
-          !/^staged-assets\/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\/[a-f0-9]{64}\.(?:mp4|mov|m4v|webm|mkv)$/i.test(key) ||
+          !/^staged-assets\/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\/[a-f0-9]{64}\.(?:mp4|mov|m4v|webm|mkv)$/.test(key) ||
           !Number.isFinite(timestamp) || timestamp > cutoff) continue;
       const removal = await signedRequest({ method: "DELETE", key });
       if (!removal.ok && removal.status !== 404) {
