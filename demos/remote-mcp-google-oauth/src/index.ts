@@ -173,7 +173,7 @@ function createServer() {
   server.registerTool(
     "youtube_upload_video",
     {
-      description: "Upload a finished video to the authenticated YouTube channel. Accepts either a public HTTPS video URL or a completed NEXUS private renderer job belonging to the authenticated Google account. Videos are private only. The tool displays an interactive approval request bound to the exact video SHA-256, title, description and connected Google account before upload. Maximum file size: 50 MB.",
+      description: "Upload a finished video to the authenticated YouTube channel. Accepts either a public HTTPS video URL or a completed NEXUS private renderer job belonging to the authenticated Google account. Videos are private only. The tool displays an interactive approval request bound to the connected Google account, source, MIME type, file size, exact video SHA-256, title and description before upload. Maximum file size: 50 MB.",
       inputSchema: z.object({
         videoUrl: z.string().url().optional(),
         projectId: z.string().uuid().optional(),
@@ -244,6 +244,7 @@ function createServer() {
             "Google channel account: " + auth.email,
             "Source: " + sourceLabel,
             "Video size: " + videoBytes.byteLength + " bytes",
+            "Media type: " + mimeType,
             "Video SHA-256: " + videoSha256,
             "Title: " + title,
             "Description: " + (description || ""),
