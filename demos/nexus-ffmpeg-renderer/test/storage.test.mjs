@@ -606,7 +606,7 @@ test("caps staged cleanup work and reports when another page or delete remains",
     process.env.AWS_SECRET_ACCESS_KEY = "test-secret";
     process.env.AWS_DEFAULT_REGION = "auto";
     const { cleanupStagedAssets } = await import("../src/storage.mjs");
-    globalThis.fetch = async (_url, init) => new Response(listing([], true));
+    globalThis.fetch = async () => new Response(listing([], true));
     const pageLimited = await cleanupStagedAssets({ maxPages: 1, now });
     assert.deepEqual(pageLimited, { scanned: 0, deleted: 0, pages: 1, truncated: true });
 
