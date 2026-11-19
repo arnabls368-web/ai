@@ -245,7 +245,7 @@ function decodeXml(value) {
 }
 
 function xmlTag(block, name) {
-  const match = block.match(new RegExp("<" + name + ">([\\\\s\\\\S]*?)</" + name + ">"));
+  const match = block.match(new RegExp("<" + name + ">([\\s\\S]*?)</" + name + ">"));
   return match ? decodeXml(match[1]) : null;
 }
 
