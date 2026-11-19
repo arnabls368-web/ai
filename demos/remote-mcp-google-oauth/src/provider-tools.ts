@@ -6,6 +6,7 @@ import { readJsonLimited } from "./utils";
 import { classifyFalGenerationStatus } from "./fal-status.mjs";
 import { recoverFalJobRecord, tryPersistFalCompletion, trustedFalUrl, validateFalJobRecord } from "./fal-provider-utils.mjs";
 import { createFalRecoveryToken, verifyFalRecoveryToken } from "./fal-recovery-token.mjs";
+import { loadFalJobRecord } from "./fal-job-record.mjs";
 import { normalizeFalModelCatalogue, normalizeFalPricing } from "./fal-catalog-utils.mjs";
 import { buildFalCostEstimateRequest, normalizeFalCostEstimate } from "./fal-cost-estimate.mjs";
 import { requestHumanApproval } from "./human-approval.mjs";
@@ -74,31 +75,6 @@ async function providerJson(url: string, init: RequestInit, provider: string): P
 }
 
 
-
-async function loadFalJobRecord(key: string, scope: string, apiKey: string, requestId: string, endpointId?: string, recoveryToken?: string) {
-  type Job = { endpointId: string; requestId: string; statusUrl: string; responseUrl: string; cancelUrl?: string; createdAt: string };
-  let job: Job | null = null;
-  let readFailed = false;
-  try {
-    job = await env.OAUTH_KV.get<Job>(key, "json");
-  } catch {
-    readFailed = true;
-  }
-  if (job) return job;
-  const authorized = Boolean(endpointId && recoveryToken &&
-    await verifyFalRecoveryToken(apiKey, scope, endpointId, requestId, recoveryToken));
-  if (!authorized || !endpointId) {
-    if (readFailed) throw new Error("NEXUS could not read the fal.ai tracking record. Retry with the endpointId and account-bound recoveryToken returned by the original submission.");
-    throw new Error("fal.ai job record not found for this account. Recovery requires the endpointId and valid account-bound recoveryToken returned by the original submission.");
-  }
-  const recovered = recoverFalJobRecord(endpointId, requestId);
-  try {
-    await env.OAUTH_KV.put(key, JSON.stringify(recovered), { expirationTtl: 60 * 60 * 24 * 7 });
-  } catch {
-    // The signed, account-bound in-memory record remains usable for this request.
-  }
-  return recovered;
-}
 
 async function estimateFalCost(apiKey: string, endpointId: string, estimateType: "historical_api_price" | "unit_price", quantity: number): Promise<{ estimateType: string; totalCost: number; currency: string }> {
   const requestBody = buildFalCostEstimateRequest(endpointId, estimateType, quantity);
@@ -367,7 +343,7 @@ export function registerProviderTools(server: McpServer) {
         if (!apiKey) throw new Error("fal.ai is not configured on this Worker. Add FAL_KEY as a Cloudflare Worker secret.");
         const scope = await accountScope();
         const key = `nexus:fal-jobs:v1:${scope}:${requestId}`;
-        const job = await loadFalJobRecord(key, scope, apiKey, requestId, endpointId, recoveryToken);
+        const job = await loadFalJobRecord({ kv: env.OAUTH_KV, key, scope, apiKey, requestId, endpointId, recoveryToken, verifyToken: verifyFalRecoveryToken, recoverRecord: recoverFalJobRecord });
         // Treat KV records as untrusted at the point of use too: validate their
         // shape and provider origins before attaching the secret API key.
         const validatedJob = validateFalJobRecord(job, requestId);
@@ -420,7 +396,7 @@ export function registerProviderTools(server: McpServer) {
         if (!apiKey) throw new Error("fal.ai is not configured on this Worker. Add FAL_KEY as a Cloudflare Worker secret.");
         const scope = await accountScope();
         const key = "nexus:fal-jobs:v1:" + scope + ":" + requestId;
-        const job = await loadFalJobRecord(key, scope, apiKey, requestId, endpointId, recoveryToken);
+        const job = await loadFalJobRecord({ kv: env.OAUTH_KV, key, scope, apiKey, requestId, endpointId, recoveryToken, verifyToken: verifyFalRecoveryToken, recoverRecord: recoverFalJobRecord });
         const validatedJob = validateFalJobRecord(job, requestId);
         if (!validatedJob.cancelUrl) {
           throw new Error("This job predates cancellation support and has no saved fal.ai cancellation URL. It can still be checked with nexus_get_media_generation.");
