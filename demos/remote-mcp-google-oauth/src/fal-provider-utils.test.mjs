@@ -84,3 +84,17 @@ test("rejects missing, mismatched, malformed, or untrusted persisted job records
     );
   }
 });
+
+test("completion metadata persistence keeps the successful output path non-fatal", async () => {
+  const { tryPersistFalCompletion } = await import("./fal-provider-utils.mjs");
+  const writes = [];
+  const kv = { put: async (...args) => { writes.push(args); } };
+  const job = { endpointId: "fal-ai/example-model", requestId: "request-1" };
+  assert.deepEqual(await tryPersistFalCompletion(kv, "job-key", job, "2026-11-19T08:00:00.000Z"), { persisted: true });
+  assert.equal(writes.length, 1);
+  assert.deepEqual(JSON.parse(writes[0][1]), { ...job, completedAt: "2026-11-19T08:00:00.000Z", completed: true });
+  assert.equal(writes[0][2].expirationTtl, 60 * 60 * 24 * 7);
+
+  const unavailableKv = { put: async () => { throw new Error("KV unavailable"); } };
+  assert.deepEqual(await tryPersistFalCompletion(unavailableKv, "job-key", job, "2026-11-19T08:00:00.000Z"), { persisted: false });
+});
