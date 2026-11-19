@@ -307,9 +307,11 @@ export function createRenderJobServer({
       }
       const isSubmission = request.method === "POST" && url.pathname === "/jobs";
       const assetMatch = request.method === "PUT" ? url.pathname.match(/^\/assets\/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})$/) : null;
-      const assetReadMatch = request.method === "GET" ? url.pathname.match(/^\/assets\/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})\/(mp4|mov|m4v|webm|mkv)$/) : null;
-      const assetDeleteMatch = request.method === "DELETE" ? url.pathname.match(/^\/assets\/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})\/(mp4|mov|m4v|webm|mkv)$/) : null;
-      const isAssetUpload = Boolean(assetMatch);
+      const stagedAssetMatch = request.method === "PUT" ? url.pathname.match(/^\/staged-assets\/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})$/) : null;
+      const assetReadMatch = request.method === "GET" ? url.pathname.match(/^\/staged-assets\/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})\/(mp4|mov|m4v|webm|mkv)$/) : null;
+      const assetDeleteMatch = request.method === "DELETE" ? url.pathname.match(/^\/staged-assets\/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})\/(mp4|mov|m4v|webm|mkv)$/) : null;
+      const isAssetUpload = Boolean(assetMatch || stagedAssetMatch);
+      const isStagedAssetUpload = Boolean(stagedAssetMatch);
       const isAssetRead = Boolean(assetReadMatch);
       const isAssetDelete = Boolean(assetDeleteMatch);
       const claims = requestClaims(request, {
@@ -328,7 +330,7 @@ export function createRenderJobServer({
       if (isAssetDelete) {
         if (claims.legacy || !claims.tenantId || !claims.projectId) return json(response, 401, { error: "signed project authorization required" });
         try {
-          await deletePrivateAsset({ tenantId: claims.tenantId, projectId: claims.projectId, assetId: assetDeleteMatch[1], extension: "." + assetDeleteMatch[2] });
+          await deletePrivateAsset({ tenantId: claims.tenantId, projectId: claims.projectId, assetId: assetDeleteMatch[1], extension: "." + assetDeleteMatch[2], prefix: "staged-assets" });
           return json(response, 200, { deleted: true });
         } catch {
           return json(response, 502, { error: "private staged asset could not be deleted" });
@@ -352,6 +354,7 @@ export function createRenderJobServer({
             projectId: claims.projectId,
             assetId: assetReadMatch[1],
             extension: "." + assetReadMatch[2],
+            prefix: "staged-assets",
             start,
             end,
           });
