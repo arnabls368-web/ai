@@ -5,7 +5,7 @@ import { chmod, mkdir, mkdtemp, open, readdir, readFile, rename, rm, lstat, writ
 import path from "node:path";
 import { constants as fsConstants } from "node:fs";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
-import { extensionForMime, getPrivateAsset, getPrivateAssetRange, putPrivateAssetFile, deletePrivateAsset, MAX_ASSET_BYTES_LIMIT } from "./storage.mjs";
+import { extensionForMime, getPrivateAsset, getPrivateAssetRange, putPrivateAssetFile, deletePrivateAsset, cleanupStagedAssets, MAX_ASSET_BYTES_LIMIT } from "./storage.mjs";
 import { renderManifest, validateManifest } from "./renderer.mjs";
 import { verifyRenderToken } from "./auth.mjs";
 
@@ -101,10 +101,16 @@ export function createRenderJobServer({
   assetTempRoot = tmpdir(),
   ffmpegPath = process.env.FFMPEG_PATH ?? "ffmpeg",
   maxConcurrent = 1,
+  cleanupEnabled = process.env.NEXUS_STAGED_ASSET_CLEANUP_ENABLED === "true",
+  cleanupIntervalMs = Number(process.env.NEXUS_STAGED_ASSET_CLEANUP_INTERVAL_MS ?? 6 * 60 * 60 * 1000),
+  cleanupFn = cleanupStagedAssets,
 } = {}) {
   if (signingSecret && signingSecret.length < 32) throw new Error("NEXUS_RENDER_SIGNING_SECRET must contain at least 32 characters.");
   if (!signingSecret && !allowLegacyToken) throw new Error("NEXUS_RENDER_SIGNING_SECRET is required when NODE_ENV=production.");
   if (!signingSecret && (!token || token.length < 32)) throw new Error("Configure NEXUS_RENDER_SIGNING_SECRET or a legacy NEXUS_RENDER_TOKEN of at least 32 characters for local development.");
+  if (cleanupEnabled && (!Number.isSafeInteger(cleanupIntervalMs) || cleanupIntervalMs < 15 * 60 * 1000 || typeof cleanupFn !== "function")) {
+    throw new Error("Staged asset cleanup requires a valid interval of at least 15 minutes.");
+  }
   if (!Number.isInteger(maxConcurrent) || maxConcurrent < 1 || maxConcurrent > 2) {
     throw new Error("maxConcurrent must be 1 or 2.");
   }
@@ -526,6 +532,27 @@ export function createRenderJobServer({
       process.stderr.write(`NEXUS render queue recovery error: ${String(error?.message ?? error)}\\n`);
     });
   });
+  let cleanupTimer;
+  let cleanupRunning = false;
+  if (cleanupEnabled && process.env.AWS_S3_BUCKET_NAME) {
+    const runCleanup = async () => {
+      if (cleanupRunning) return;
+      cleanupRunning = true;
+      try {
+        await ready;
+        const result = await cleanupFn();
+        process.stdout.write(\`NEXUS staged asset cleanup: scanned=\${result.scanned} deleted=\${result.deleted} truncated=\${result.truncated}\\n\`);
+      } catch (error) {
+        process.stderr.write(\`NEXUS staged asset cleanup failed: \${String(error?.message ?? error)}\\n\`);
+      } finally {
+        cleanupRunning = false;
+      }
+    };
+    void ready.then(runCleanup);
+    cleanupTimer = setInterval(runCleanup, cleanupIntervalMs);
+    cleanupTimer.unref();
+    server.once("close", () => clearInterval(cleanupTimer));
+  }
   return server;
 }
 
