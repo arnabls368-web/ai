@@ -16,7 +16,7 @@ NEXUS is a remote MCP server for planning and coordinating a YouTube video-produ
 | Channel insights | `youtube_get_channel_overview`, `youtube_list_recent_videos`, `youtube_get_channel_analytics` | Requires Google OAuth and the corresponding YouTube API scopes |
 | Upload | `youtube_upload_video` | Private only; maximum 50 MiB; interactive approval for each exact upload |
 
-The provider-status tools report whether integrations are configured. A configured credential or a successful health response is not proof that a complete provider workflow has succeeded.
+The provider-status tools report whether integrations are configured. A configured credential or a successful health response is not proof that a complete provider workflow has succeeded. fal.ai job polling recognizes only explicit queued, running, completed and failed states; unknown provider states fail closed rather than being reported as pending. Once a completed output has been retrieved, a transient KV failure while refreshing completion metadata does not suppress that output; NEXUS returns it with a tracking warning.
 
 ## Architecture
 
