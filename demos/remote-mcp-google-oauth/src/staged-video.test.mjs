@@ -121,3 +121,15 @@ test("staged video cleanup uses the dedicated scoped DELETE route", async () => 
     path: "/assets/asset-1/mp4",
   });
 });
+
+
+test("rejects staged asset identifiers that could escape the renderer route", async () => {
+  let called = false;
+  await assert.rejects(stageVideoSource({
+    assetId: "../outside",
+    source: new Response(new Uint8Array([1])),
+    mimeType: "video/mp4",
+    callRenderer: async () => { called = true; return Response.json({}); },
+  }), /readable video source and private renderer/);
+  assert.equal(called, false);
+});
