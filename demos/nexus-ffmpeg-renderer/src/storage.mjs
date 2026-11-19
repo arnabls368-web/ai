@@ -257,8 +257,15 @@ function decodeXml(value) {
 }
 
 function xmlTag(block, name) {
-  const match = block.match(new RegExp("<" + name + ">([\\s\\S]*?)</" + name + ">"));
-  return match ? decodeXml(match[1]) : null;
+  // Tag names are internal constants. Avoid building a RegExp from a variable.
+  const openingTag = "<" + name + ">";
+  const closingTag = "</" + name + ">";
+  const start = block.indexOf(openingTag);
+  if (start < 0) return null;
+  const contentStart = start + openingTag.length;
+  const end = block.indexOf(closingTag, contentStart);
+  if (end < 0) return null;
+  return decodeXml(block.slice(contentStart, end));
 }
 
 async function readResponseTextBounded(response, maxBytes) {
