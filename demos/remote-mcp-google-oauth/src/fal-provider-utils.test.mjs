@@ -38,7 +38,7 @@ test("rejects embedded credentials, explicit ports, query strings and fragments"
 });
 
 test("rejects malformed and non-string inputs", () => {
-  for (const value of ["not a URL", "", null, undefined, 42]) {
+  for (const value of ["not a URL", "", null, undefined, 42, {}, { toString: () => "https://queue.fal.run/model/status" }, "https://queue.fal.run/" + "a".repeat(2_049)]) {
     assert.throws(() => trustedFalUrl(value), /unexpected queue URL/);
   }
 });
