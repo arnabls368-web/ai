@@ -1088,3 +1088,54 @@ test("staged asset range reads require the dedicated signed asset:read scope", a
     }
   });
 });
+
+
+test("staged asset deletion requires asset:delete scope and deletes only the signed tenant/project object", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const keys = ["AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION"];
+    const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    const originalFetch = globalThis.fetch;
+    let storageRequest;
+    try {
+      process.env.AWS_ENDPOINT_URL = "https://objects.example.test";
+      process.env.AWS_S3_BUCKET_NAME = "nexus-private";
+      process.env.AWS_ACCESS_KEY_ID = "test-access";
+      process.env.AWS_SECRET_ACCESS_KEY = "test-secret";
+      process.env.AWS_DEFAULT_REGION = "auto";
+      globalThis.fetch = async (url, init) => {
+        storageRequest = { url: String(url), method: init.method, authorization: init.headers.get("authorization") };
+        return new Response(null, { status: 204 });
+      };
+      const instance = await startSignedServer(workRoot);
+      try {
+        const token = signedHeader("tenant-cleanup", "project-cleanup", "asset:delete").authorization;
+        const result = await new Promise((resolve, reject) => {
+          const req = httpRequest(instance.base + "/assets/asset-123.mp4", {
+            method: "DELETE",
+            headers: { authorization: token },
+          }, (response) => {
+            let body = "";
+            response.setEncoding("utf8");
+            response.on("data", (chunk) => { body += chunk; });
+            response.on("end", () => resolve({ status: response.statusCode, body }));
+          });
+          req.on("error", reject);
+          req.end();
+        });
+        assert.equal(result.status, 200);
+        assert.deepEqual(JSON.parse(result.body), { deleted: true });
+        assert.equal(storageRequest.method, "DELETE");
+        assert.match(storageRequest.url, /assets\/tenant-cleanup\/project-cleanup\//);
+        assert.match(storageRequest.authorization, /^AWS4-HMAC-SHA256/);
+      } finally {
+        await instance.close();
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+});
