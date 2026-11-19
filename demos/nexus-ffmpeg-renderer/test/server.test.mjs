@@ -1291,3 +1291,51 @@ test("private staged asset denials are normalized to not-found for reads and del
     }
   });
 });
+
+
+
+test("staged asset stream failures are handled without crashing the renderer", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const keys = ["AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION"];
+    const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    const originalFetch = globalThis.fetch;
+    for (const [key, value] of Object.entries({
+      AWS_ENDPOINT_URL: "https://objects.example.test",
+      AWS_S3_BUCKET_NAME: "nexus-private",
+      AWS_ACCESS_KEY_ID: "test-access",
+      AWS_SECRET_ACCESS_KEY: "test-secret",
+      AWS_DEFAULT_REGION: "auto",
+    })) process.env[key] = value;
+    const instance = await startSignedServer(workRoot);
+    globalThis.fetch = async (url, init) => {
+      if (String(url).startsWith(instance.base)) return originalFetch(url, init);
+      const body = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new Uint8Array([1]));
+          queueMicrotask(() => controller.error(new Error("simulated upstream stream failure")));
+        },
+      });
+      return new Response(body, {
+        status: 206,
+        headers: { "content-range": "bytes 0-2/10", "content-length": "3" },
+      });
+    };
+    try {
+      await assert.rejects(async () => {
+        const response = await originalFetch(instance.base + "/staged-assets/video-1/mp4", {
+          headers: { ...signedHeader("tenant-a", "project-a", "asset:read"), range: "bytes=0-2" },
+        });
+        await response.arrayBuffer();
+      });
+      const health = await originalFetch(instance.base + "/health");
+      assert.equal(health.status, 200);
+    } finally {
+      globalThis.fetch = originalFetch;
+      await instance.close();
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+});
