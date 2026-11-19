@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { loadFalJobRecord } from "./fal-job-record.mjs";
+import { validateFalJobRecord } from "./fal-provider-utils.mjs";
 
 const record = {
   endpointId: "fal-ai/model/text-to-video",
@@ -19,6 +20,7 @@ const base = {
   recoveryToken: "signed-capability",
   verifyToken: async () => true,
   recoverRecord: () => record,
+  validateRecord: validateFalJobRecord,
 };
 
 function fakeKv({ get = async () => null, put = async () => {} } = {}) {
@@ -34,6 +36,15 @@ test("recovers a stale KV miss only with a valid account-bound token and refresh
   assert.equal(writes[0][0], base.key);
   assert.equal(JSON.parse(writes[0][1]).requestId, base.requestId);
   assert.equal(writes[0][2].expirationTtl, 604800);
+});
+
+test("replaces a malformed cached queue record only after signed recovery", async () => {
+  const malformed = { ...record, responseUrl: "https://queue.fal.run/other-owner/other-app/requests/" + record.requestId };
+  const { kv, writes } = fakeKv({ get: async () => malformed });
+  const result = await loadFalJobRecord({ ...base, kv });
+  assert.deepEqual(result, record);
+  assert.equal(writes.length, 1);
+  assert.deepEqual(JSON.parse(writes[0][1]), record);
 });
 
 test("recovers through a KV read outage when the token verifies", async () => {
