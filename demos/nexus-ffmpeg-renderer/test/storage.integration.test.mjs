@@ -28,8 +28,10 @@ test("real S3-compatible staged-object PUT, range GET, tenant isolation and DELE
     "NEXUS_STORAGE_INTEGRATION_BUCKET_CONFIRM must exactly match AWS_S3_BUCKET_NAME.");
   assert.ok(credentialsPresent,
     "AWS_ENDPOINT_URL, AWS_DEFAULT_REGION, and dedicated test credentials are required.");
-  assert.match(bucket, /(?:test|sandbox|integration)/i,
-    "Refusing real integration writes unless the bucket name clearly identifies a test/sandbox bucket.");
+  assert.match(bucket, /(?:^|[-_])(test|sandbox|integration)(?:[-_]|$)/i,
+    "Refusing real integration writes unless the bucket name has a distinct test/sandbox/integration segment.");
+  assert.equal(process.env.AWS_S3_URL_STYLE, "virtual-host",
+    "AWS_S3_URL_STYLE must be virtual-host for this integration test.");
 
   const tenantId = "integration-" + randomUUID();
   const projectId = "project-" + randomUUID();
@@ -37,7 +39,6 @@ test("real S3-compatible staged-object PUT, range GET, tenant isolation and DELE
   const directory = await mkdtemp(join(tmpdir(), "nexus-s3-integration-"));
   const filePath = join(directory, "fixture.mp4");
   const payload = Buffer.from("NEXUS-S3-INTEGRATION-FIXTURE\n0123456789abcdef\n");
-  let uploaded = false;
 
   try {
     await writeFile(filePath, payload, { mode: 0o600 });
@@ -49,7 +50,6 @@ test("real S3-compatible staged-object PUT, range GET, tenant isolation and DELE
       filePath,
       prefix: "staged-assets",
     });
-    uploaded = true;
     assert.equal(metadata.bytes, payload.length);
     assert.match(metadata.sha256, /^[a-f0-9]{64}$/);
 
@@ -92,7 +92,6 @@ test("real S3-compatible staged-object PUT, range GET, tenant isolation and DELE
       prefix: "staged-assets",
     });
     assert.equal(deleted.deleted, true);
-    uploaded = false;
 
     await assert.rejects(
       getPrivateAssetRange({
@@ -108,7 +107,7 @@ test("real S3-compatible staged-object PUT, range GET, tenant isolation and DELE
       "The exact object should be absent after deletion.",
     );
   } finally {
-    if (uploaded) {
+    {
       await deletePrivateAsset({
         tenantId,
         projectId,
