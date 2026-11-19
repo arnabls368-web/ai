@@ -341,7 +341,10 @@ export function createRenderJobServer({
         try {
           await deletePrivateAsset({ tenantId: claims.tenantId, projectId: claims.projectId, assetId: assetDeleteMatch[1], extension: "." + assetDeleteMatch[2], prefix: "staged-assets" });
           return json(response, 200, { deleted: true });
-        } catch {
+        } catch (error) {
+          if (error.status === 403 || error.status === 404) {
+            return json(response, 404, { error: "staged asset not found" });
+          }
           return json(response, 502, { error: "private staged asset could not be deleted" });
         }
       }
@@ -378,8 +381,11 @@ export function createRenderJobServer({
           Readable.fromWeb(stored.body).pipe(response);
           return;
         } catch (error) {
-          if (error.status === 404 || error.status === 416) {
-            return json(response, error.status, { error: error.message });
+          if (error.status === 403 || error.status === 404) {
+            return json(response, 404, { error: "staged asset not found" });
+          }
+          if (error.status === 416) {
+            return json(response, 416, { error: error.message });
           }
           return json(response, 502, { error: "private staged asset could not be read" });
         }
