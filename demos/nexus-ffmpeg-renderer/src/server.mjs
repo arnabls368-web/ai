@@ -392,15 +392,16 @@ export function createRenderJobServer({
           const uploadPath = path.join(uploadDirectory, "asset");
           try {
             await writeBinaryLimited(request, uploadPath, mimeType.startsWith("video/") ? MAX_VIDEO_ASSET_BYTES : MAX_ASSET_BYTES_LIMIT);
+            const assetId = (stagedAssetMatch ?? assetMatch)[1];
             const stored = await putPrivateAssetFile({
               tenantId: claims.tenantId,
               projectId: claims.projectId,
-              assetId: (stagedAssetMatch ?? assetMatch)[1],
+              assetId,
               mimeType,
               ...(isStagedAssetUpload ? { prefix: "staged-assets" } : {}),
               filePath: uploadPath,
             });
-            return json(response, 201, { assetId: assetMatch[1], filename: assetMatch[1] + stored.extension, bytes: stored.bytes, sha256: stored.sha256, storage: "private_object_storage" });
+            return json(response, 201, { assetId, filename: assetId + stored.extension, bytes: stored.bytes, sha256: stored.sha256, storage: "private_object_storage" });
           } finally {
             await rm(uploadDirectory, { recursive: true, force: true });
           }
