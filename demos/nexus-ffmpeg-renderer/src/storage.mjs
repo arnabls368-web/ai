@@ -376,7 +376,10 @@ export async function deletePrivateAsset({ tenantId, projectId, assetId, extensi
   if (!response.ok && response.status !== 404) {
     const status = response.status;
     await response.body?.cancel();
-    throw new Error("Private object storage could not delete staged asset (HTTP " + status + ").");
+    throw Object.assign(
+      new Error("Private object storage could not delete staged asset (HTTP " + status + ")."),
+      { status },
+    );
   }
   await response.body?.cancel();
   return { deleted: response.status !== 404 };
