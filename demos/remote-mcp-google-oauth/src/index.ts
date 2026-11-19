@@ -264,7 +264,7 @@ function createServer() {
         return { isError: true, content: [{ type: "text", text: message }] };
       } finally {
         if (cleanupStagedAsset) {
-          try { await cleanupStagedAsset(); } catch { /* Object lifecycle expiry is the fallback. */ }
+          try { await cleanupStagedAsset(); } catch { /* The scheduled staged-prefix cleanup sweep is the crash-recovery fallback. */ }
         }
       }
     },
