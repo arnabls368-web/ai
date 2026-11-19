@@ -173,7 +173,7 @@ export function createRenderJobServer({
       // Never recurse into arbitrary entries or follow symlinks in the job folder.
       const jobEntries = await readdir(directoryPath);
       for (const name of jobEntries) {
-        if (!/^job\\.[0-9a-f-]{36}\\.tmp$/i.test(name)) continue;
+        if (!/^job\.[0-9a-f-]{36}\.tmp$/i.test(name)) continue;
         const temporaryPath = path.join(directoryPath, name);
         const temporaryInfo = await lstat(temporaryPath);
         if (temporaryInfo.isFile() || temporaryInfo.isSymbolicLink()) {
