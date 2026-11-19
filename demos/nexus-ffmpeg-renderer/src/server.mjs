@@ -111,6 +111,9 @@ export function createRenderJobServer({
   if (cleanupEnabled && (!Number.isSafeInteger(cleanupIntervalMs) || cleanupIntervalMs < 15 * 60 * 1000 || typeof cleanupFn !== "function")) {
     throw new Error("Staged asset cleanup requires a valid interval of at least 15 minutes.");
   }
+  if (cleanupEnabled && !(process.env.AWS_S3_BUCKET_NAME ?? "").trim()) {
+    throw new Error("NEXUS_STAGED_ASSET_CLEANUP_ENABLED requires AWS_S3_BUCKET_NAME.");
+  }
   if (!Number.isInteger(maxConcurrent) || maxConcurrent < 1 || maxConcurrent > 2) {
     throw new Error("maxConcurrent must be 1 or 2.");
   }
