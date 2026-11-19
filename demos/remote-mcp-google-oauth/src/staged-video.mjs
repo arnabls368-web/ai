@@ -27,9 +27,31 @@ export async function stageVideoSource({ source, mimeType, callRenderer, assetId
   }
   let record;
   try {
-    const text = await response.text();
-    if (text.length > 8192) throw new Error("Staging metadata is too large.");
-    record = JSON.parse(text);
+    if (!response.body) throw new Error("Missing staging response body.");
+    const reader = response.body.getReader();
+    const chunks = [];
+    let size = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > 8192) {
+          await reader.cancel("Staging metadata exceeds 8 KiB.");
+          throw new Error("Staging metadata is too large.");
+        }
+        chunks.push(value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    record = JSON.parse(new TextDecoder().decode(bytes));
   } catch {
     throw new Error("Private renderer returned invalid staging metadata.");
   }
