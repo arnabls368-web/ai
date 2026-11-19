@@ -320,7 +320,7 @@ export function registerProviderTools(server: McpServer) {
     "nexus_get_media_generation",
     {
       description: "Check a previously submitted fal.ai generation and retrieve its output when complete. Jobs are scoped to the authenticated Google account.",
-      inputSchema: z.object({ requestId: z.string().uuid(), endpointId: z.string().min(3).max(200).regex(/^[a-z0-9][a-z0-9._-]*(\\/[a-z0-9][a-z0-9._-]*){1,4}$/i).optional() }),
+      inputSchema: z.object({ requestId: z.string().uuid(), endpointId: z.string().min(3).max(200).regex(/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*){1,4}$/i).optional() }),
     },
     async ({ requestId, endpointId }) => {
       try {
@@ -382,7 +382,7 @@ export function registerProviderTools(server: McpServer) {
     "nexus_cancel_media_generation",
     {
       description: "Request cancellation of a fal.ai generation job submitted by the signed-in Google account. A queued job may be removed; an in-progress runner receives a cancellation signal, but stopping is model-dependent. Does not cancel or refund work already completed.",
-      inputSchema: z.object({ requestId: z.string().uuid(), endpointId: z.string().min(3).max(200).regex(/^[a-z0-9][a-z0-9._-]*(\\/[a-z0-9][a-z0-9._-]*){1,4}$/i).optional() }),
+      inputSchema: z.object({ requestId: z.string().uuid(), endpointId: z.string().min(3).max(200).regex(/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*){1,4}$/i).optional() }),
     },
     async ({ requestId, endpointId }) => {
       try {
