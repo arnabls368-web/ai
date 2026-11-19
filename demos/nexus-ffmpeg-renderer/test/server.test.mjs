@@ -733,11 +733,12 @@ test("job status survives a render-service restart", async () => {
     await writeFile(orphanedTemp, "interrupted atomic write");
     const restarted = await startServer(workRoot);
     try {
-      assert.equal((await readdir(path.join(workRoot, jobId))).includes(path.basename(orphanedTemp)), false);
       const response = await fetch(`${restarted.base}/jobs/${jobId}`, {
         headers: { authorization: `Bearer ${TOKEN}` },
       });
       assert.equal(response.status, 200);
+      // The first request waits for asynchronous recovery to finish.
+      assert.equal((await readdir(path.join(workRoot, jobId))).includes(path.basename(orphanedTemp)), false);
       const job = await response.json();
       assert.equal(job.id, jobId);
       assert.equal(job.status, "failed");
