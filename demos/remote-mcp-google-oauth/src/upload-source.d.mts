@@ -6,3 +6,4 @@ export type UploadSourceInput = {
 
 export declare function hasExactlyOneUploadSource(input: UploadSourceInput): boolean;
 export declare function isVerifiedRenderJob(project: unknown, projectId: string, renderJobId: string): boolean;
+export declare function isCompleteUploadSourceResponse(status: number): boolean;
