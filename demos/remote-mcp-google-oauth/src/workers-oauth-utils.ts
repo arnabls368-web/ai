@@ -445,6 +445,11 @@ export interface ApprovalDialogOptions {
 export function renderApprovalDialog(request: Request, options: ApprovalDialogOptions): Response {
 	const { client, server, encodedState, csrfToken, setCookie } = options;
 
+	// Escape every value interpolated into an HTML attribute, including
+	// signed state and CSRF values, so future format changes stay safe.
+	const safeEncodedState = sanitizeText(encodedState);
+	const safeCsrfToken = sanitizeText(csrfToken);
+	const formAction = sanitizeText(new URL(request.url).pathname);
 	const serverName = sanitizeText(server.name);
 	const clientName = client?.clientName ? sanitizeText(client.clientName) : "Unknown MCP Client";
 	const serverDescription = server.description ? sanitizeText(server.description) : "";
@@ -744,9 +749,9 @@ export function renderApprovalDialog(request: Request, options: ApprovalDialogOp
 
             <p>This MCP Client is requesting to be authorized on ${serverName}. If you approve, you will be redirected to complete authentication.</p>
 
-            <form method="post" action="${new URL(request.url).pathname}">
-              <input type="hidden" name="state" value="${encodedState}">
-              <input type="hidden" name="csrf_token" value="${csrfToken}">
+            <form method="post" action="${formAction}">
+              <input type="hidden" name="state" value="${safeEncodedState}">
+              <input type="hidden" name="csrf_token" value="${safeCsrfToken}">
 
               <div class="actions">
                 <button type="button" class="button button-secondary" onclick="window.history.back()">Cancel</button>
