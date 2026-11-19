@@ -199,6 +199,10 @@ export async function uploadResumableVideoFromRanges({
           });
           if (status.status === 308) {
             const acknowledged = nextUploadOffset(status.headers.get("Range"), totalBytes);
+            if (acknowledged < offset) {
+              await status.body?.cancel();
+              throw new Error("YouTube resumable-upload progress moved backwards.");
+            }
             if (acknowledged > lastSentEnd + 1) {
               await status.body?.cancel();
               throw new Error("YouTube acknowledged bytes beyond the submitted chunk.");
@@ -250,6 +254,10 @@ export async function uploadResumableVideoFromRanges({
       }
       if (uploaded.status === 308) {
         const acknowledged = nextUploadOffset(uploaded.headers.get("Range"), totalBytes);
+        if (acknowledged < offset) {
+          await uploaded.body?.cancel();
+          throw new Error("YouTube resumable-upload progress moved backwards.");
+        }
         if (acknowledged > end + 1) {
           await uploaded.body?.cancel();
           throw new Error("YouTube acknowledged bytes beyond the submitted chunk.");
