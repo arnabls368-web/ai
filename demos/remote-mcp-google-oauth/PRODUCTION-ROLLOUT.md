@@ -10,6 +10,7 @@ This document is an operator checklist, not authorization to deploy. The pull re
 - The live Railway service has not enabled `NEXUS_STAGED_ASSET_CLEANUP_ENABLED`.
 - The renderer's current Railway deployment uses Railpack, not the repository Dockerfile. The Dockerfile's `RAILWAY_RUN_UID=0` startup path is therefore not a current-service prerequisite unless the service is deliberately switched to the Dockerfile builder.
 - Real S3-compatible storage interoperability, Worker-to-renderer transfer, render persistence across restart, and authenticated Google OAuth/YouTube upload have not been proven end to end.
+- The Cloudflare deployment workflow is manual-only (`workflow_dispatch`) and its deployment job is restricted to `refs/heads/main`. Selecting a feature branch for manual dispatch must not execute the credential-bearing deploy job. This guard does not replace branch protection, environment approvals, or explicit operator approval for a production rollout.
 
 ## Gate 0 — verify before any rollout
 
