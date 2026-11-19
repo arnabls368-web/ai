@@ -49,9 +49,9 @@ test("rejects unsupported video MIME types before staging", async () => {
 test("rejects oversized, malformed, or mismatched staging metadata", async () => {
   const source = () => new Response(new Uint8Array([1]));
   const cases = [
-    { assetId: "asset-1", filename: "asset-1.mp4", bytes: MAX_STAGED_VIDEO_BYTES + 1, sha256 },
-    { assetId: "asset-1", filename: "other.mp4", bytes: 3, sha256 },
-    { assetId: "asset-1", filename: "asset-1.mp4", bytes: 3, sha256: "bad" },
+    { assetId: "asset-1", filename: "asset-1.mp4", bytes: MAX_STAGED_VIDEO_BYTES + 1, sha256, storage: "private_object_storage" },
+    { assetId: "asset-1", filename: "other.mp4", bytes: 3, sha256, storage: "private_object_storage" },
+    { assetId: "asset-1", filename: "asset-1.mp4", bytes: 3, sha256: "bad", storage: "private_object_storage" },
   ];
   for (const record of cases) {
     await assert.rejects(stageVideoSource({
