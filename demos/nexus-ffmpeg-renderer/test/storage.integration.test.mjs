@@ -107,15 +107,13 @@ test("real S3-compatible staged-object PUT, range GET, tenant isolation and DELE
       "The exact object should be absent after deletion.",
     );
   } finally {
-    {
-      await deletePrivateAsset({
+    await deletePrivateAsset({
         tenantId,
         projectId,
         assetId,
         extension: ".mp4",
         prefix: "staged-assets",
-      }).catch(() => {});
-    }
+    }).catch(() => {});
     await rm(directory, { recursive: true, force: true });
   }
 });
