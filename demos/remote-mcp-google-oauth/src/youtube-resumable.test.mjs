@@ -130,7 +130,7 @@ test("re-reads staged ranges after interrupted chunk uploads and status checks",
   });
   assert.equal(response.status, 201);
   assert.equal(calls.length, 3);
-  assert.equal(calls[1].headers.get("Content-Range"), `bytes */${totalBytes}`);
+  assert.equal(new Headers(calls[1].headers).get("Content-Range"), `bytes */${totalBytes}`);
   assert.deepEqual(requested, [[0, 262143], [10000, totalBytes - 1]]);
   assert.equal(calls[2].headers.get("Content-Range"), `bytes 10000-${totalBytes - 1}/${totalBytes}`);
 });
