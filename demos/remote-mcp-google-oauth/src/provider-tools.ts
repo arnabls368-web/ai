@@ -6,6 +6,7 @@ import { readJsonLimited } from "./utils";
 import { isFalGenerationFailed } from "./fal-status.mjs";
 import { trustedFalUrl, validateFalJobRecord } from "./fal-provider-utils.mjs";
 import { normalizeFalModelCatalogue, normalizeFalPricing } from "./fal-catalog-utils.mjs";
+import { buildFalCostEstimateRequest, normalizeFalCostEstimate } from "./fal-cost-estimate.mjs";
 import { requestHumanApproval } from "./human-approval.mjs";
 import { serializeApprovalBinding } from "./approval-binding.mjs";
 
@@ -74,18 +75,13 @@ async function providerJson(url: string, init: RequestInit, provider: string): P
 
 
 async function estimateFalCost(apiKey: string, endpointId: string, estimateType: "historical_api_price" | "unit_price", quantity: number): Promise<{ estimateType: string; totalCost: number; currency: string }> {
-  const endpointEstimate = estimateType === "historical_api_price" ? { call_quantity: quantity } : { unit_quantity: quantity };
+  const requestBody = buildFalCostEstimateRequest(endpointId, estimateType, quantity);
   const data = await providerJson("https://api.fal.ai/v1/models/pricing/estimate", {
     method: "POST",
     headers: { Authorization: `Key ${apiKey}`, Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify({ estimate_type: estimateType, endpoints: { [endpointId]: endpointEstimate } }),
+    body: JSON.stringify(requestBody),
   }, "fal.ai cost estimate");
-  if (!data || data.estimate_type !== estimateType || typeof data.total_cost !== "number" ||
-      !Number.isFinite(data.total_cost) || data.total_cost < 0 ||
-      typeof data.currency !== "string" || !/^[A-Z]{3}$/.test(data.currency)) {
-    throw new Error("fal.ai returned an invalid cost estimate.");
-  }
-  return { estimateType, totalCost: data.total_cost, currency: data.currency };
+  return normalizeFalCostEstimate(data, estimateType);
 }
 
 export function registerProviderTools(server: McpServer) {
