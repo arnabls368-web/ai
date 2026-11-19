@@ -2,7 +2,7 @@ const RENDERER_AUDIENCE = "nexus-renderer";
 const MAX_RENDER_TOKEN_TTL_SECONDS = 300;
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
-type RenderScope = "render:submit" | "render:read" | "asset:write";
+type RenderScope = "render:submit" | "render:read" | "asset:write" | "asset:read";
 
 function base64UrlEncode(bytes: Uint8Array): string {
   let binary = "";
@@ -38,7 +38,7 @@ export async function createRenderAuthorizationToken({
   if (!ID_PATTERN.test(tenantId) || !ID_PATTERN.test(projectId)) {
     throw new Error("A valid tenant and project identity are required.");
   }
-  if (!["render:submit", "render:read", "asset:write"].includes(scope)) {
+  if (!["render:submit", "render:read", "asset:write", "asset:read"].includes(scope)) {
     throw new Error("Unsupported renderer authorization scope.");
   }
   if (!Number.isInteger(ttlSeconds) || ttlSeconds < 1 || ttlSeconds > MAX_RENDER_TOKEN_TTL_SECONDS) {
@@ -80,6 +80,7 @@ export async function callPrivateRenderer({
   body,
   rawBody,
   contentType,
+  range,
 }: {
   baseUrl: string;
   secret: string;
@@ -100,7 +101,8 @@ export async function callPrivateRenderer({
     throw new Error("Invalid private renderer path.");
   }
   const validRequestShape =
-    (method === "GET" && scope === "render:read" && body === undefined && rawBody === undefined) ||
+    (method === "GET" && scope === "render:read" && body === undefined && rawBody === undefined && range === undefined) ||
+    (method === "GET" && scope === "asset:read" && body === undefined && rawBody === undefined && typeof range === "string" && /^bytes=\\d+-\\d+$/.test(range)) ||
     (method === "POST" && scope === "render:submit" && body !== undefined && rawBody === undefined) ||
     (method === "PUT" && scope === "asset:write" && body === undefined && rawBody !== undefined);
   if (!validRequestShape) {
@@ -110,6 +112,7 @@ export async function callPrivateRenderer({
     secret, tenantId, projectId, scope,
   });
   const headers = new Headers({ Authorization: `Bearer ${token}` });
+  if (range !== undefined) headers.set("Range", range);
   let requestBody: string | undefined;
   if (body !== undefined) {
     requestBody = JSON.stringify(body);
