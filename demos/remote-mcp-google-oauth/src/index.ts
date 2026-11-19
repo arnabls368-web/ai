@@ -10,7 +10,7 @@ import { registerProviderTools } from "./provider-tools";
 import { callPrivateRenderer } from "./render-auth";
 import { hasExactlyOneUploadSource, isVerifiedRenderJob } from "./upload-source.mjs";
 import { uploadResumableVideoFromRanges } from "./youtube-resumable.mjs";
-import { stageVideoSource, createStagedVideoRangeReader } from "./staged-video.mjs";
+import { stageVideoSource, createStagedVideoRangeReader, deleteStagedVideoAsset } from "./staged-video.mjs";
 import { requestHumanApproval } from "./human-approval.mjs";
 import { serializeApprovalBinding } from "./approval-binding.mjs";
 import { validateExternalVideoUrl } from "./external-video-url.mjs";
@@ -152,6 +152,7 @@ function createServer() {
     async ({ videoUrl, projectId, renderJobId, title, description, privacyStatus }, ctx) => {
       const auth = getMcpAuthContext()?.props as Props | undefined;
       if (!auth?.accessToken) return { isError: true, content: [{ type: "text", text: "YouTube is not connected. Reconnect your Google account." }] };
+      let cleanupStagedAsset: (() => Promise<void>) | undefined;
       try {
         const email = auth.email?.trim().toLowerCase();
         if (!email) throw new Error("The authenticated Google account has no verified email scope.");
@@ -194,8 +195,8 @@ function createServer() {
         }
         const rendererProjectId = projectId ?? "youtube-uploads";
         const callStagingRenderer = (request: {
-          method: "GET" | "PUT";
-          scope: "asset:read" | "asset:write";
+          method: "GET" | "PUT" | "DELETE";
+          scope: "asset:read" | "asset:write" | "asset:delete";
           path: string;
           rawBody?: ReadableStream<Uint8Array>;
           contentType?: string;
@@ -208,6 +209,11 @@ function createServer() {
           ...request,
         });
         const staged = await stageVideoSource({ source, mimeType, callRenderer: callStagingRenderer });
+        cleanupStagedAsset = () => deleteStagedVideoAsset({
+          assetId: staged.assetId,
+          extension: staged.extension,
+          callRenderer: callStagingRenderer,
+        });
         const readRange = createStagedVideoRangeReader({
           assetId: staged.assetId,
           extension: staged.extension,
@@ -256,6 +262,10 @@ function createServer() {
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown upload error";
         return { isError: true, content: [{ type: "text", text: message }] };
+      } finally {
+        if (cleanupStagedAsset) {
+          try { await cleanupStagedAsset(); } catch { /* Object lifecycle expiry is the fallback. */ }
+        }
       }
     },
   );
