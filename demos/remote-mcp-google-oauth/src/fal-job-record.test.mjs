@@ -20,13 +20,22 @@ const base = {
   recoveryToken: "signed-capability",
   verifyToken: async () => true,
   recoverRecord: () => record,
-  validateRecord: validateFalJobRecord,
+  validateRecord: (job, requestId, endpointId) => validateFalJobRecord(job, requestId, endpointId),
 };
 
 function fakeKv({ get = async () => null, put = async () => {} } = {}) {
   const writes = [];
   return { kv: { get, put: async (...args) => { writes.push(args); return put(...args); } }, writes };
 }
+
+test("does not accept a cached record for a different supplied endpoint", async () => {
+  const { kv, writes } = fakeKv({ get: async () => record });
+  await assert.rejects(
+    loadFalJobRecord({ ...base, kv, endpointId: "fal-ai/different-model", recoveryToken: undefined }),
+    /record not found|could not read/,
+  );
+  assert.equal(writes.length, 0);
+});
 
 test("recovers a stale KV miss only with a valid account-bound token and refreshes KV", async () => {
   const { kv, writes } = fakeKv();
