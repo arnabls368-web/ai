@@ -16,9 +16,10 @@ export function trustedFalUrl(value) {
   return url.toString();
 }
 
-export function validateFalJobRecord(job, expectedRequestId) {
+export function validateFalJobRecord(job, expectedRequestId, expectedEndpointId) {
   if (!job || typeof job !== "object" || Array.isArray(job) ||
       job.requestId !== expectedRequestId ||
+      (expectedEndpointId !== undefined && job.endpointId !== expectedEndpointId) ||
       typeof job.endpointId !== "string" ||
       job.endpointId.length > 200 ||
       !/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*){1,4}$/i.test(job.endpointId) ||
