@@ -1,8 +1,4 @@
-export function buildFalCostEstimateRequest(
-  endpointId: string,
-  estimateType: FalEstimateType,
-  quantity: number,
-) {
+export function buildFalCostEstimateRequest(endpointId, estimateType, quantity) {
   if (!/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*){1,4}$/i.test(endpointId)) {
     throw new Error("Invalid fal.ai endpoint ID.");
   }
@@ -20,14 +16,11 @@ export function buildFalCostEstimateRequest(
   };
 }
 
-export function normalizeFalCostEstimate(
-  data: unknown,
-  expectedType: FalEstimateType,
-): { estimateType: FalEstimateType; totalCost: number; currency: string } {
+export function normalizeFalCostEstimate(data, expectedType) {
   if (!data || typeof data !== "object") {
     throw new Error("fal.ai returned an invalid cost estimate.");
   }
-  const value = data as Record<string, unknown>;
+  const value = data;
   if (value.estimate_type !== expectedType ||
       typeof value.total_cost !== "number" ||
       !Number.isFinite(value.total_cost) || value.total_cost < 0 ||
