@@ -165,6 +165,7 @@ export async function uploadResumableVideoFromRanges({
   fetchImpl = fetch,
   maxAttempts = 4,
   chunkBytes = DEFAULT_UPLOAD_CHUNK_BYTES,
+  checkStatusFirst = false,
 }) {
   if (!Number.isSafeInteger(totalBytes) || totalBytes < 1 || totalBytes > 50 * 1024 * 1024) {
     throw new Error("A video size between 1 byte and 50 MiB is required.");
@@ -179,9 +180,11 @@ export async function uploadResumableVideoFromRanges({
   }
 
   let offset = 0;
+  let checkSession = checkStatusFirst;
   while (offset < totalBytes) {
     let lastFailure;
-    let mustCheckStatus = false;
+    let mustCheckStatus = checkSession;
+    checkSession = false;
     let advanced = false;
     let lastSentEnd = offset - 1;
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
