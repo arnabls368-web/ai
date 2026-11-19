@@ -186,7 +186,8 @@ export async function uploadResumableVideoFromRanges({
     let mustCheckStatus = checkSession;
     checkSession = false;
     let advanced = false;
-    let lastSentEnd = offset - 1;
+    // A fresh status-first pass may discover bytes accepted by the previous token/session attempt.
+    let lastSentEnd = mustCheckStatus && checkStatusFirst ? totalBytes - 1 : offset - 1;
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       if (mustCheckStatus) {
         try {
