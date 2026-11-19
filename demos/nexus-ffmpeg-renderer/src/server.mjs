@@ -510,7 +510,7 @@ export function createRenderJobServer({
       else response.destroy(error);
     }
   });
-  server.requestTimeout = 30_000;
+  server.requestTimeout = 120_000;
   server.headersTimeout = 15_000;
   server.keepAliveTimeout = 5_000;
 
