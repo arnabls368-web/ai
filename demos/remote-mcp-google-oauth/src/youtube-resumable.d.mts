@@ -21,4 +21,5 @@ export function uploadResumableVideoFromRanges(options: {
   fetchImpl?: typeof fetch;
   maxAttempts?: number;
   chunkBytes?: number;
+  checkStatusFirst?: boolean;
 }): Promise<Response>;
