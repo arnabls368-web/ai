@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { hasExactlyOneUploadSource, isVerifiedRenderJob } from "./upload-source.mjs";
+import { hasExactlyOneUploadSource, isVerifiedRenderJob, isCompleteUploadSourceResponse } from "./upload-source.mjs";
 
 test("accepts exactly one public URL source", () => {
   assert.equal(hasExactlyOneUploadSource({ videoUrl: "https://cdn.example/video.mp4" }), true);
@@ -26,4 +26,11 @@ test("accepts only the exact successful render output", () => {
   assert.equal(isVerifiedRenderJob({ ...project, renderJob: { ...project.renderJob, status: "running" } }, "project", "job"), false);
   assert.equal(isVerifiedRenderJob({ ...project, renderJob: { ...project.renderJob, outputUrl: "https://evil.example/video.mp4" } }, "project", "job"), false);
   assert.equal(isVerifiedRenderJob(null, "project", "job"), false);
+});
+
+test("accepts only complete HTTP 200 upload-source responses", () => {
+  assert.equal(isCompleteUploadSourceResponse(200), true);
+  for (const status of [201, 204, 206, 301, 304, 404, 500]) {
+    assert.equal(isCompleteUploadSourceResponse(status), false, String(status));
+  }
 });
