@@ -541,9 +541,9 @@ export function createRenderJobServer({
       try {
         await ready;
         const result = await cleanupFn();
-        process.stdout.write(\`NEXUS staged asset cleanup: scanned=\${result.scanned} deleted=\${result.deleted} truncated=\${result.truncated}\\n\`);
+        process.stdout.write(`NEXUS staged asset cleanup: scanned=${result.scanned} deleted=${result.deleted} truncated=${result.truncated}\\n`);
       } catch (error) {
-        process.stderr.write(\`NEXUS staged asset cleanup failed: \${String(error?.message ?? error)}\\n\`);
+        process.stderr.write(`NEXUS staged asset cleanup failed: ${String(error?.message ?? error)}\\n`);
       } finally {
         cleanupRunning = false;
       }
