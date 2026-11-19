@@ -84,6 +84,24 @@ async function waitForFailedJob(base, id, headers = { authorization: `Bearer ${T
   throw new Error("Render job did not reach a terminal state in time.");
 }
 
+async function waitForPersistedJob(workRoot, id, status) {
+  const directory = path.join(workRoot, id);
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      const [entries, contents] = await Promise.all([
+        readdir(directory),
+        readFile(path.join(directory, "job.json"), "utf8"),
+      ]);
+      const record = JSON.parse(contents);
+      if (record.status === status && !entries.some((entry) => entry.endsWith(".tmp"))) return record;
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Render job did not finish persisting its terminal state in time.");
+}
+
 test("HTTP server applies bounded request and keep-alive timeouts", async () => {
   await withWorkRoot(async (workRoot) => {
     const instance = await startServer(workRoot);
@@ -706,6 +724,7 @@ test("job status survives a render-service restart", async () => {
       assert.equal(response.status, 202);
       jobId = (await response.json()).id;
       await waitForFailedJob(first.base, jobId);
+      await waitForPersistedJob(workRoot, jobId, "failed");
     } finally {
       await first.close();
     }
