@@ -230,3 +230,22 @@ export async function getPrivateAssetRange({ tenantId, projectId, assetId, exten
 }
 
 export const MAX_ASSET_BYTES_LIMIT = MAX_ASSET_BYTES;
+
+
+/** Delete a tenant/project-scoped private staged asset. Missing objects are already clean. */
+export async function deletePrivateAsset({ tenantId, projectId, assetId, extension }) {
+  if (!/^\\.(?:mp4|mov|m4v|webm|mkv)$/i.test(extension)) {
+    throw new Error("Unsupported staged video extension.");
+  }
+  const response = await signedRequest({
+    method: "DELETE",
+    key: objectKey(tenantId, projectId, assetId, extension),
+  });
+  if (!response.ok && response.status !== 404) {
+    const status = response.status;
+    await response.body?.cancel();
+    throw new Error("Private object storage could not delete staged asset (HTTP " + status + ").");
+  }
+  await response.body?.cancel();
+  return { deleted: response.status !== 404 };
+}
