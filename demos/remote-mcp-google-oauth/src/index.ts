@@ -9,11 +9,11 @@ import { registerProductionTools } from "./production-tools";
 import { registerProviderTools } from "./provider-tools";
 import { callPrivateRenderer } from "./render-auth";
 import { hasExactlyOneUploadSource, isVerifiedRenderJob } from "./upload-source.mjs";
-import { uploadResumableVideo } from "./youtube-resumable.mjs";
+import { uploadResumableVideoFromRanges } from "./youtube-resumable.mjs";
+import { stageVideoSource, createStagedVideoRangeReader } from "./staged-video.mjs";
 import { requestHumanApproval } from "./human-approval.mjs";
 import { serializeApprovalBinding } from "./approval-binding.mjs";
 import { validateExternalVideoUrl } from "./external-video-url.mjs";
-import { readVideoBodyBounded } from "./read-video-body.mjs";
 export { OAuthStateDO } from "./oauth-state-do";
 
 export type Props = {
@@ -43,7 +43,8 @@ const humanApprovalApi = {
 };
 
 async function uploadToYouTube(
-  videoBytes: ArrayBuffer,
+  totalBytes: number,
+  readRange: (start: number, end: number) => Promise<{ body: ReadableStream<Uint8Array> | ArrayBuffer | Uint8Array; byteLength: number }>,
   mimeType: string,
   title: string,
   description: string,
@@ -65,7 +66,7 @@ async function uploadToYouTube(
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json; charset=UTF-8",
           "X-Upload-Content-Type": mimeType,
-          "X-Upload-Content-Length": String(videoBytes.byteLength),
+          "X-Upload-Content-Length": String(totalBytes),
         },
         body: JSON.stringify(metadata),
         redirect: "error",
@@ -91,9 +92,10 @@ async function uploadToYouTube(
       throw new Error("YouTube returned an unexpected upload URL; refusing to send authorization credentials.");
     }
 
-    const uploaded = await uploadResumableVideo({
+    const uploaded = await uploadResumableVideoFromRanges({
       uploadUrl: parsedUploadUrl.toString(),
-      videoBytes,
+      totalBytes,
+      readRange,
       mimeType,
       accessToken: token,
     });
