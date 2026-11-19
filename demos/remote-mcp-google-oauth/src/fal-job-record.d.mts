@@ -19,5 +19,5 @@ export function loadFalJobRecord(options: {
   recoveryToken?: string;
   verifyToken: (apiKey: string, scope: string, endpointId: string, requestId: string, token: string) => Promise<boolean>;
   recoverRecord: (endpointId: string, requestId: string) => FalJobRecord;
-  validateRecord: (job: unknown, requestId: string) => FalJobRecord;
+  validateRecord: (job: unknown, requestId: string, expectedEndpointId?: string) => FalJobRecord;
 }): Promise<FalJobRecord>;
