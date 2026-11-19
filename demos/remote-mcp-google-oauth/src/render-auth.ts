@@ -2,7 +2,7 @@ const RENDERER_AUDIENCE = "nexus-renderer";
 const MAX_RENDER_TOKEN_TTL_SECONDS = 300;
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
-type RenderScope = "render:submit" | "render:read" | "asset:write" | "asset:read";
+type RenderScope = "render:submit" | "render:read" | "asset:write" | "asset:read" | "asset:delete";
 
 function base64UrlEncode(bytes: Uint8Array): string {
   let binary = "";
@@ -38,7 +38,7 @@ export async function createRenderAuthorizationToken({
   if (!ID_PATTERN.test(tenantId) || !ID_PATTERN.test(projectId)) {
     throw new Error("A valid tenant and project identity are required.");
   }
-  if (!["render:submit", "render:read", "asset:write", "asset:read"].includes(scope)) {
+  if (!["render:submit", "render:read", "asset:write", "asset:read", "asset:delete"].includes(scope)) {
     throw new Error("Unsupported renderer authorization scope.");
   }
   if (!Number.isInteger(ttlSeconds) || ttlSeconds < 1 || ttlSeconds > MAX_RENDER_TOKEN_TTL_SECONDS) {
@@ -88,7 +88,7 @@ export async function callPrivateRenderer({
   projectId: string;
   scope: RenderScope;
   path: string;
-  method?: "GET" | "POST" | "PUT";
+  method?: "GET" | "POST" | "PUT" | "DELETE";
   body?: unknown;
   rawBody?: ArrayBuffer | ReadableStream<Uint8Array>;
   contentType?: string;
@@ -105,7 +105,8 @@ export async function callPrivateRenderer({
     (method === "GET" && scope === "render:read" && body === undefined && rawBody === undefined && range === undefined) ||
     (method === "GET" && scope === "asset:read" && body === undefined && rawBody === undefined && typeof range === "string" && /^bytes=\d+-\d+$/.test(range)) ||
     (method === "POST" && scope === "render:submit" && body !== undefined && rawBody === undefined) ||
-    (method === "PUT" && scope === "asset:write" && body === undefined && rawBody !== undefined);
+    (method === "PUT" && scope === "asset:write" && body === undefined && rawBody !== undefined) ||
+    (method === "DELETE" && scope === "asset:delete" && body === undefined && rawBody === undefined && range === undefined);
   if (!validRequestShape) {
     throw new Error("Renderer request method or body does not match its authorization scope.");
   }
