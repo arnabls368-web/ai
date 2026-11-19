@@ -47,23 +47,23 @@ test("validates persisted fal.ai job records and normalizes trusted queue URLs",
   const record = validateFalJobRecord({
     endpointId: "fal-ai/example-model",
     requestId: "4d1f2c8e-0d7b-4d6e-9a2a-1f8e2f2d6a01",
-    statusUrl: "https://queue.fal.run/fal-ai/example-model/requests/abc/status",
-    responseUrl: "https://queue.fal.run/fal-ai/example-model/requests/abc",
-    cancelUrl: "https://queue.fal.run/fal-ai/example-model/requests/abc/cancel",
+    statusUrl: "https://queue.fal.run/fal-ai/example-model/requests/4d1f2c8e-0d7b-4d6e-9a2a-1f8e2f2d6a01/status",
+    responseUrl: "https://queue.fal.run/fal-ai/example-model/requests/4d1f2c8e-0d7b-4d6e-9a2a-1f8e2f2d6a01",
+    cancelUrl: "https://queue.fal.run/fal-ai/example-model/requests/4d1f2c8e-0d7b-4d6e-9a2a-1f8e2f2d6a01/cancel",
     createdAt: "2026-11-19T06:00:00.000Z",
   }, "4d1f2c8e-0d7b-4d6e-9a2a-1f8e2f2d6a01");
   assert.equal(record.endpointId, "fal-ai/example-model");
-  assert.equal(record.statusUrl, "https://queue.fal.run/fal-ai/example-model/requests/abc/status");
+  assert.equal(record.statusUrl, "https://queue.fal.run/fal-ai/example-model/requests/4d1f2c8e-0d7b-4d6e-9a2a-1f8e2f2d6a01/status");
   assert.equal(record.responseUrl, "https://queue.fal.run/fal-ai/example-model/requests/abc");
-  assert.equal(record.cancelUrl, "https://queue.fal.run/fal-ai/example-model/requests/abc/cancel");
+  assert.equal(record.cancelUrl, "https://queue.fal.run/fal-ai/example-model/requests/4d1f2c8e-0d7b-4d6e-9a2a-1f8e2f2d6a01/cancel");
 });
 
 test("rejects missing, mismatched, malformed, or untrusted persisted job records", () => {
   const valid = {
     endpointId: "fal-ai/example-model",
     requestId: "4d1f2c8e-0d7b-4d6e-9a2a-1f8e2f2d6a01",
-    statusUrl: "https://queue.fal.run/model/status",
-    responseUrl: "https://queue.fal.run/model/result",
+    statusUrl: "https://queue.fal.run/fal-ai/example-model/requests/4d1f2c8e-0d7b-4d6e-9a2a-1f8e2f2d6a01/status",
+    responseUrl: "https://queue.fal.run/fal-ai/example-model/requests/4d1f2c8e-0d7b-4d6e-9a2a-1f8e2f2d6a01",
   };
   for (const record of [
     null,
@@ -77,6 +77,10 @@ test("rejects missing, mismatched, malformed, or untrusted persisted job records
     { ...valid, responseUrl: "https://queue.fal.run/result?token=unexpected" },
     { ...valid, cancelUrl: "https://attacker.example/cancel" },
     { ...valid, cancelUrl: "http://queue.fal.run/cancel" },
+    { ...valid, statusUrl: "https://queue.fal.run/fal-ai/example-model/requests/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/status" },
+    { ...valid, responseUrl: "https://queue.fal.run/other-owner/other-app/requests/4d1f2c8e-0d7b-4d6e-9a2a-1f8e2f2d6a01" },
+    { ...valid, statusUrl: "https://queue.fal.run/fal-ai/example-model/requests/4d1f2c8e-0d7b-4d6e-9a2a-1f8e2f2d6a01/result" },
+    { ...valid, cancelUrl: "https://queue.fal.run/fal-ai/example-model/requests/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/cancel" },
   ]) {
     assert.throws(
       () => validateFalJobRecord(record, valid.requestId),
