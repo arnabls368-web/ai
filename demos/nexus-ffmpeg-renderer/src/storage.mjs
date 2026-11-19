@@ -103,6 +103,9 @@ function signedRequest({ method, key, body, contentType, payloadHash: suppliedPa
 }
 
 function objectKey(tenantId, projectId, assetId, extension, prefix = "assets") {
+  if (prefix !== "assets" && prefix !== "staged-assets") {
+    throw new Error("Private asset storage prefix is not allowed.");
+  }
   const digest = createHash("sha256").update(assetId).digest("hex");
   return prefix + "/" + tenantId + "/" + projectId + "/" + digest + extension;
 }
