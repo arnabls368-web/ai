@@ -19,6 +19,7 @@ test("uploads the complete video in one request when the session succeeds", asyn
   assert.equal(response.status, 201);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].body.byteLength, 6);
+  assert.equal(calls[0].body.buffer, bytes, "the upload body should view the original buffer without copying");
   assert.equal(calls[0].headers.get("Content-Range"), null);
 });
 
@@ -42,7 +43,8 @@ test("checks session progress after a lost response and resumes only remaining b
   assert.equal(calls.length, 3);
   assert.equal(new Headers(calls[1].headers).get("Content-Range"), "bytes */6");
   assert.equal(calls[2].headers.get("Content-Range"), "bytes 3-5/6");
-  assert.deepEqual([...new Uint8Array(calls[2].body)], [40, 50, 60]);
+  assert.deepEqual([...calls[2].body], [40, 50, 60]);
+  assert.equal(calls[2].body.buffer, bytes, "resumed uploads should view the original buffer without copying");
 });
 
 test("checks session progress after a server error before retrying", async () => {
