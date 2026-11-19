@@ -1,0 +1,60 @@
+name: NEXUS FFmpeg renderer
+
+on:
+  pull_request:
+    paths:
+      - "demos/nexus-ffmpeg-renderer/**"
+      - ".github/workflows/nexus-ffmpeg-renderer.yml"
+  push:
+    branches:
+      - main
+      - feature/youtube-upload-mcp
+    paths:
+      - "demos/nexus-ffmpeg-renderer/**"
+      - ".github/workflows/nexus-ffmpeg-renderer.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  renderer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Run renderer unit tests
+        run: node --test demos/nexus-ffmpeg-renderer/test/*.test.mjs
+      - name: Build renderer container
+        run: docker build -t nexus-ffmpeg-renderer demos/nexus-ffmpeg-renderer
+      - name: Smoke-test real FFmpeg encode in the container
+        run: |
+          docker run --rm --entrypoint sh nexus-ffmpeg-renderer -ec '
+            ffmpeg -hide_banner -loglevel error -f lavfi -i color=c=black:s=320x180:d=1 -frames:v 24 -c:v libx264 -pix_fmt yuv420p -movflags +faststart -y /tmp/nexus-smoke.mp4
+            ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height -of csv=s=x:p=0 /tmp/nexus-smoke.mp4
+          '
+      - name: Verify non-root startup with a writable volume
+        run: |
+          docker run --rm --tmpfs /work:uid=1000,gid=1000 nexus-ffmpeg-renderer sh -ec '
+            test "$(id -u)" -ne 0
+            touch /work/non-root-startup-check /assets/non-root-startup-check
+          '
+      - name: Verify Railway volume initialization preserves existing job data and drops privileges
+        run: |
+          docker volume create nexus-renderer-volume-ownership-test
+          trap 'docker volume rm -f nexus-renderer-volume-ownership-test >/dev/null' EXIT
+          docker run --rm --mount source=nexus-renderer-volume-ownership-test,target=/work --entrypoint sh nexus-ffmpeg-renderer -ec '
+            test "$(id -u)" -ne 0
+            printf "existing-job-data" > /work/existing-job.json
+          '
+          docker run --rm --user 0:0 --mount source=nexus-renderer-volume-ownership-test,target=/work nexus-ffmpeg-renderer sh -ec '
+            test "$(id -u)" -ne 0
+            test "$(cat /work/existing-job.json)" = "existing-job-data"
+            test "$(stat -c %u /work/existing-job.json)" = "1000"
+            printf "%s" "-preserved" >> /work/existing-job.json
+            test -w /assets
+            touch /assets/railway-volume-startup-check
+          '

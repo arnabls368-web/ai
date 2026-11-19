@@ -6,13 +6,25 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "phn-youtube-mcp",
   "main": "src/index.ts",
-  "compatibility_date": "2025-03-10",
+  "compatibility_date": "2026-11-17",
   "compatibility_flags": ["nodejs_compat"],
   // The URL MCP clients connect to. Set it to your deployed URL, for example
   // https://<worker-name>.<your-subdomain>.workers.dev/mcp
+  "workers_dev": true,
   "vars": {
-    "MCP_RESOURCE": "https://phn-youtube-mcp.arnabls368.workers.dev/mcp",
+    "MCP_RESOURCE": "https://phn-youtube-mcp.arnab368.workers.dev/mcp",
+    "HOSTED_DOMAIN": "",
+    // Comma-separated exact hostnames permitted as external video URL sources.
+    "YOUTUBE_UPLOAD_ALLOWED_HOSTS": "",
   },
+  "durable_objects": {
+    "bindings": [
+      { "name": "OAUTH_STATE", "class_name": "OAuthStateDO" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["OAuthStateDO"] }
+  ],
   "kv_namespaces": [
     {
       "binding": "OAUTH_KV",

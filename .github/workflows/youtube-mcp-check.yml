@@ -1,0 +1,53 @@
+name: YouTube MCP type check
+
+on:
+  pull_request:
+    paths:
+      - "demos/remote-mcp-google-oauth/**"
+      - ".github/workflows/youtube-mcp-check.yml"
+  push:
+    branches:
+      - feature/youtube-upload-mcp
+    paths:
+      - "demos/remote-mcp-google-oauth/**"
+      - ".github/workflows/youtube-mcp-check.yml"
+
+jobs:
+  type-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install locked workspace dependencies
+        run: pnpm install --frozen-lockfile --filter remote-mcp-google-oauth...
+      - name: Run TypeScript check
+        run: pnpm --filter remote-mcp-google-oauth run type-check
+      - name: Exercise approval flow with the real MCP SDK
+        run: node --test demos/remote-mcp-google-oauth/src/human-approval-sdk.spec.mjs
+      - name: Verify Worker-to-renderer signed token compatibility
+        run: node --experimental-strip-types --test demos/remote-mcp-google-oauth/src/render-auth.spec.mjs
+      - name: Verify browser-bound one-time OAuth state
+        run: node --experimental-transform-types --test demos/remote-mcp-google-oauth/src/oauth-state.spec.mjs
+      - name: Validate Cloudflare Worker bundle
+        run: pnpm --filter remote-mcp-google-oauth exec wrangler deploy --dry-run
+
+  upload-source-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: demos/remote-mcp-google-oauth
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Run dependency-free upload source tests
+        run: node --experimental-transform-types --test src/*.test.mjs src/workers-oauth-utils.spec.mjs

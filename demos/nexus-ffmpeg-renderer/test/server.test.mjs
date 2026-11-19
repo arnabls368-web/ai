@@ -1,0 +1,1406 @@
+import test from "node:test";
+import { createHash } from "node:crypto";
+import assert from "node:assert/strict";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { request as httpRequest } from "node:http";
+import { createRenderJobServer } from "../src/server.mjs";
+import { signRenderToken, verifyRenderToken } from "../src/auth.mjs";
+
+const TOKEN = "test-token-that-is-at-least-32-characters-long";
+const SIGNING_SECRET = "test-signing-secret-that-is-at-least-32-characters";
+
+async function startServer(workRoot, { ffmpegPath } = {}) {
+  const server = createRenderJobServer({
+    token: TOKEN,
+    assetRoot: path.join(workRoot, "assets"),
+    workRoot,
+    ffmpegPath,
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  return {
+    server,
+    base: `http://127.0.0.1:${address.port}`,
+    close: () => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
+  };
+}
+
+async function startSignedServer(workRoot, { ffmpegPath, assetTempRoot } = {}) {
+  const server = createRenderJobServer({
+    token: "",
+    signingSecret: SIGNING_SECRET,
+    assetRoot: path.join(workRoot, "assets"),
+    workRoot,
+    ffmpegPath,
+    assetTempRoot,
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  return {
+    base: `http://127.0.0.1:${address.port}`,
+    close: () => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
+  };
+}
+
+function signedHeader(tenantId, projectId, scope) {
+  return { authorization: `Bearer ${signRenderToken({
+    secret: SIGNING_SECRET, tenantId, projectId, scope,
+  })}` };
+}
+
+async function withWorkRoot(run) {
+  const workRoot = await mkdtemp(path.join(os.tmpdir(), "nexus-render-test-"));
+  try {
+    await run(workRoot);
+  } finally {
+    await rm(workRoot, { recursive: true, force: true });
+  }
+}
+
+function validPayload() {
+  return {
+    manifest: {
+      version: 1,
+      renderer: "ffmpeg",
+      durationSeconds: 1,
+      aspectRatio: "16:9",
+      output: { resolution: "720p", frameRate: "24", format: "mp4" },
+      tracks: { video: [{ scene: 1, startSeconds: 0, durationSeconds: 1, assetId: "scene", fit: "cover" }] },
+    },
+    assetMap: { scene: "scene.jpg" },
+  };
+}
+
+async function waitForFailedJob(base, id, headers = { authorization: `Bearer ${TOKEN}` }) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const response = await fetch(`${base}/jobs/${id}`, { headers });
+    assert.equal(response.status, 200);
+    const job = await response.json();
+    if (job.status === "failed") return job;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Render job did not reach a terminal state in time.");
+}
+
+async function waitForPersistedJob(workRoot, id, status) {
+  const directory = path.join(workRoot, id);
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      const [entries, contents] = await Promise.all([
+        readdir(directory),
+        readFile(path.join(directory, "job.json"), "utf8"),
+      ]);
+      const record = JSON.parse(contents);
+      if (record.status === status && !entries.some((entry) => entry.endsWith(".tmp"))) return record;
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Render job did not finish persisting its terminal state in time.");
+}
+
+test("HTTP server applies bounded request and keep-alive timeouts", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const instance = await startServer(workRoot);
+    try {
+      assert.equal(instance.server.requestTimeout, 120_000);
+      assert.equal(instance.server.headersTimeout, 15_000);
+      assert.equal(instance.server.keepAliveTimeout, 5_000);
+    } finally {
+      await instance.close();
+    }
+  });
+});
+
+test("restricts persisted job storage permissions", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const instance = await startServer(workRoot);
+    try {
+      const rootInfo = await stat(workRoot);
+      assert.equal(rootInfo.mode & 0o777, 0o700);
+      const response = await fetch(`${instance.base}/jobs`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify(validPayload()),
+      });
+      assert.equal(response.status, 202);
+      const { id } = await response.json();
+      await waitForFailedJob(instance.base, id);
+      const jobDirectory = path.join(workRoot, id);
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        try {
+          const record = await stat(path.join(jobDirectory, "job.json"));
+          assert.equal(record.mode & 0o777, 0o600);
+          break;
+        } catch {
+          if (attempt === 99) throw new Error("Job record was not persisted.");
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      }
+      const directoryInfo = await stat(jobDirectory);
+      assert.equal(directoryInfo.mode & 0o777, 0o700);
+    } finally {
+      await instance.close();
+    }
+  });
+});
+test("restart recovery rejects symlinked completed render outputs", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const assetRoot = path.join(workRoot, "assets");
+    await mkdir(assetRoot, { recursive: true });
+    await writeFile(path.join(assetRoot, "scene.jpg"), "image");
+    const fakeFfmpeg = path.join(workRoot, "fake-ffmpeg");
+    await writeFile(fakeFfmpeg, "#!/usr/bin/env node\nconst fs = require('node:fs');\nfs.writeFileSync(process.argv.at(-1), 'fake mp4 output');\n");
+    await chmod(fakeFfmpeg, 0o700);
+    const first = await startServer(workRoot, { ffmpegPath: fakeFfmpeg });
+    let id;
+    try {
+      const submitted = await fetch(`${first.base}/jobs`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify(validPayload()),
+      });
+      assert.equal(submitted.status, 202);
+      ({ id } = await submitted.json());
+      let job;
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const response = await fetch(`${first.base}/jobs/${id}`, { headers: { authorization: `Bearer ${TOKEN}` } });
+        job = await response.json();
+        if (job.status === "succeeded" || job.status === "failed") break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.equal(job.status, "succeeded");
+    } finally {
+      await first.close();
+    }
+    const outputPath = path.join(workRoot, id, "render.mp4");
+    const externalFile = path.join(workRoot, "outside.mp4");
+    await rm(outputPath, { force: true });
+    await writeFile(externalFile, "not a renderer-owned output");
+    await symlink(externalFile, outputPath);
+    const restarted = await startServer(workRoot, { ffmpegPath: fakeFfmpeg });
+    try {
+      const status = await fetch(`${restarted.base}/jobs/${id}`, { headers: { authorization: `Bearer ${TOKEN}` } });
+      assert.equal(status.status, 200);
+      const recovered = await status.json();
+      assert.equal(recovered.status, "failed");
+      const output = await fetch(`${restarted.base}/jobs/${id}/output`, { headers: { authorization: `Bearer ${TOKEN}` } });
+      assert.equal(output.status, 409);
+    } finally {
+      await restarted.close();
+    }
+  });
+});
+test("output download refuses symlink replacement after job completion", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const assetRoot = path.join(workRoot, "assets");
+    await mkdir(assetRoot, { recursive: true });
+    await writeFile(path.join(assetRoot, "scene.jpg"), "image");
+    const fakeFfmpeg = path.join(workRoot, "fake-ffmpeg");
+    await writeFile(fakeFfmpeg, ["#!/usr/bin/env node", "const fs = require('node:fs');", "fs.writeFileSync(process.argv.at(-1), 'fake mp4 output');", ""].join("\n"));
+    await chmod(fakeFfmpeg, 0o700);
+    const instance = await startServer(workRoot, { ffmpegPath: fakeFfmpeg });
+    try {
+      const submitted = await fetch(`${instance.base}/jobs`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify(validPayload()),
+      });
+      assert.equal(submitted.status, 202);
+      const { id } = await submitted.json();
+      let job;
+      for (let attempt = 0; attempt < 1000; attempt += 1) {
+        const status = await fetch(`${instance.base}/jobs/${id}`, { headers: { authorization: `Bearer ${TOKEN}` } });
+        job = await status.json();
+        if (job.status === "succeeded" || job.status === "failed") break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.equal(job.status, "succeeded");
+      const outputPath = path.join(workRoot, id, "render.mp4");
+      const externalFile = path.join(workRoot, "outside-download.mp4");
+      await rm(outputPath, { force: true });
+      await writeFile(externalFile, "must not be served");
+      await symlink(externalFile, outputPath);
+      const download = await fetch(`${instance.base}/jobs/${id}/output`, {
+        headers: { authorization: `Bearer ${TOKEN}` },
+      });
+      assert.equal(download.status, 500);
+      assert.equal(await download.text().then((body) => body.includes("must not be served")), false);
+    } finally {
+      await instance.close();
+    }
+  });
+});
+
+test("render execution rejects symlink output paths", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const assetRoot = path.join(workRoot, "assets");
+    await mkdir(assetRoot, { recursive: true });
+    await writeFile(path.join(assetRoot, "scene.jpg"), "image");
+    const externalFile = path.join(workRoot, "outside.mp4");
+    await writeFile(externalFile, "do not modify this target");
+    const fakeFfmpeg = path.join(workRoot, "fake-ffmpeg");
+    const script = ["#!/bin/sh", 'for arg do output="$arg"; done', `ln -s ${JSON.stringify(externalFile)} "$output"`, ""].join("\n");
+    await writeFile(fakeFfmpeg, script);
+    await chmod(fakeFfmpeg, 0o700);
+    const instance = await startServer(workRoot, { ffmpegPath: fakeFfmpeg });
+    try {
+      const submitted = await fetch(`${instance.base}/jobs`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify(validPayload()),
+      });
+      assert.equal(submitted.status, 202);
+      const { id } = await submitted.json();
+      let job;
+      for (let attempt = 0; attempt < 500; attempt += 1) {
+        const status = await fetch(`${instance.base}/jobs/${id}`, { headers: { authorization: `Bearer ${TOKEN}` } });
+        job = await status.json();
+        if (job.status === "succeeded" || job.status === "failed") break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.equal(job.status, "failed", `unexpected terminal job state: ${job.status}; ${job.error ?? ""}`);
+      assert.match(job.error, /regular.*file/i);
+      assert.equal(await (await import("node:fs/promises")).readFile(externalFile, "utf8"), "do not modify this target");
+      assert.equal((await stat(externalFile)).mode & 0o777, 0o644);
+    } finally {
+      await instance.close();
+    }
+  });
+});
+test("health endpoint is available without credentials", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const server = await startServer(workRoot);
+    try {
+      const response = await fetch(`${server.base}/health`);
+      assert.equal(response.status, 200);
+      const result = await response.json();
+      assert.equal(result.service, "nexus-render-jobs");
+      assert.equal(result.persistence, "filesystem");
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("stores completed render outputs with owner-only permissions", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const assetRoot = path.join(workRoot, "assets");
+    await mkdir(assetRoot, { recursive: true });
+    await writeFile(path.join(assetRoot, "scene.jpg"), "image");
+    const fakeFfmpeg = path.join(workRoot, "fake-ffmpeg");
+    await writeFile(fakeFfmpeg, "#!/usr/bin/env node\nconst fs = require('node:fs');\nfs.writeFileSync(process.argv.at(-1), 'fake mp4 output');\n");
+    await chmod(fakeFfmpeg, 0o700);
+    const instance = await startServer(workRoot, { ffmpegPath: fakeFfmpeg });
+    try {
+      const response = await fetch(`${instance.base}/jobs`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify(validPayload()),
+      });
+      assert.equal(response.status, 202);
+      const { id } = await response.json();
+      let job;
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const status = await fetch(`${instance.base}/jobs/${id}`, { headers: { authorization: `Bearer ${TOKEN}` } });
+        job = await status.json();
+        if (job.status === "succeeded" || job.status === "failed") break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.equal(job.status, "succeeded");
+      const output = await stat(path.join(workRoot, id, "render.mp4"));
+      assert.equal(output.mode & 0o777, 0o600);
+    } finally {
+      await instance.close();
+    }
+  });
+});
+test("job API rejects missing bearer credentials", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const server = await startServer(workRoot);
+    try {
+      const response = await fetch(`${server.base}/jobs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(validPayload()),
+      });
+      assert.equal(response.status, 401);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("job API rejects non-JSON submission content types", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const instance = await startServer(workRoot);
+    try {
+      const response = await fetch(`${instance.base}/jobs`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${TOKEN}`,
+          "content-type": "text/plain",
+        },
+        body: JSON.stringify(validPayload()),
+      });
+      assert.equal(response.status, 415);
+    } finally {
+      await instance.close();
+    }
+  });
+});
+
+test("authenticated job submission validates manifests before queueing", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const server = await startServer(workRoot);
+    try {
+      const invalid = await fetch(`${server.base}/jobs`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${TOKEN}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ manifest: {}, assetMap: {} }),
+      });
+      assert.equal(invalid.status, 400);
+      assert.match((await invalid.json()).error, /manifest/i);
+
+      const response = await fetch(`${server.base}/jobs`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${TOKEN}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(validPayload()),
+      });
+      assert.equal(response.status, 202);
+      const result = await response.json();
+      assert.match(result.id, /^[0-9a-f-]{36}$/i);
+      assert.ok(["queued", "running"].includes(result.status));
+      assert.equal(result.statusUrl, `/jobs/${result.id}`);
+      await waitForFailedJob(server.base, result.id);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("restart recovery enforces the bounded render queue", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const ids = Array.from({ length: 5 }, (_, index) =>
+      `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`);
+    for (const id of ids) {
+      const directory = path.join(workRoot, id);
+      await mkdir(directory, { recursive: true });
+      await writeFile(path.join(directory, "job.json"), JSON.stringify({
+        id,
+        tenantId: null,
+        projectId: null,
+        status: "queued",
+        createdAt: new Date().toISOString(),
+        ...validPayload(),
+      }));
+    }
+    const restarted = await startServer(workRoot);
+    try {
+      const results = [];
+      for (const id of ids) {
+        let job;
+        for (let attempt = 0; attempt < 200; attempt += 1) {
+          const response = await fetch(`${restarted.base}/jobs/${id}`, {
+            headers: { authorization: `Bearer ${TOKEN}` },
+          });
+          assert.equal(response.status, 200);
+          job = await response.json();
+          if (job.status === "failed" || job.status === "succeeded") break;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        assert.equal(job.status, "failed");
+        results.push(job);
+      }
+      assert.equal(results.filter((job) => /queue capacity was exceeded during service recovery/i.test(job.error ?? "")).length, 2);
+    } finally {
+      await restarted.close();
+    }
+  });
+});
+
+test("live submissions cannot exceed the bounded queue capacity", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const assetRoot = path.join(workRoot, "assets");
+    await mkdir(assetRoot, { recursive: true });
+    await writeFile(path.join(assetRoot, "scene.jpg"), "image");
+    const fakeFfmpeg = path.join(workRoot, "slow-fake-ffmpeg");
+    await writeFile(fakeFfmpeg, [
+      "#!/usr/bin/env node",
+      "const fs = require('node:fs');",
+      "setTimeout(() => fs.writeFileSync(process.argv.at(-1), 'fake mp4 output'), 700);",
+      "",
+    ].join("\n"));
+    await chmod(fakeFfmpeg, 0o700);
+    const instance = await startServer(workRoot, { ffmpegPath: fakeFfmpeg });
+    try {
+      const submit = () => fetch(`${instance.base}/jobs`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify(validPayload()),
+      });
+      const first = await submit();
+      assert.equal(first.status, 202);
+      const second = await submit();
+      assert.equal(second.status, 202);
+      const third = await submit();
+      assert.equal(third.status, 202);
+      const accepted = await Promise.all([first, second, third].map((response) => response.json()));
+      const fourth = await submit();
+      assert.equal(fourth.status, 429);
+      assert.match((await fourth.json()).error, /queue is full/i);
+
+      // Do not remove the temporary work root while accepted FFmpeg jobs are
+      // still writing their outputs; otherwise cleanup races the render worker.
+      for (const { id } of accepted) {
+        let job;
+        for (let attempt = 0; attempt < 500; attempt += 1) {
+          const status = await fetch(`${instance.base}/jobs/${id}`, {
+            headers: { authorization: `Bearer ${TOKEN}` },
+          });
+          assert.equal(status.status, 200);
+          job = await status.json();
+          if (job.status === "succeeded" || job.status === "failed") break;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        assert.equal(job.status, "succeeded");
+      }
+    } finally {
+      await instance.close();
+    }
+  });
+});
+
+test("concurrent live submissions reserve queue capacity atomically", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const assetRoot = path.join(workRoot, "assets");
+    await mkdir(assetRoot, { recursive: true });
+    await writeFile(path.join(assetRoot, "scene.jpg"), "image");
+    const fakeFfmpeg = path.join(workRoot, "slow-fake-ffmpeg");
+    await writeFile(fakeFfmpeg, [
+      "#!/usr/bin/env node",
+      "const fs = require('node:fs');",
+      "setTimeout(() => fs.writeFileSync(process.argv.at(-1), 'fake mp4 output'), 250);",
+      "",
+    ].join("\n"));
+    await chmod(fakeFfmpeg, 0o700);
+    const instance = await startServer(workRoot, { ffmpegPath: fakeFfmpeg });
+    try {
+      const submit = () => fetch(`${instance.base}/jobs`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify(validPayload()),
+      });
+      const responses = await Promise.all(Array.from({ length: 10 }, () => submit()));
+      assert.equal(responses.filter((response) => response.status === 202).length, 3);
+      assert.equal(responses.filter((response) => response.status === 429).length, 7);
+      const accepted = await Promise.all(responses.filter((response) => response.status === 202).map((response) => response.json()));
+      for (const { id } of accepted) {
+        let job;
+        for (let attempt = 0; attempt < 500; attempt += 1) {
+          const status = await fetch(`${instance.base}/jobs/${id}`, {
+            headers: { authorization: `Bearer ${TOKEN}` },
+          });
+          job = await status.json();
+          if (job.status === "succeeded" || job.status === "failed") break;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        assert.equal(job.status, "succeeded");
+      }
+    } finally {
+      await instance.close();
+    }
+  });
+});
+
+test("restart recovery removes stale partial private-asset downloads before retrying", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const keys = ["AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION", "AWS_S3_URL_STYLE"];
+    const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    const originalFetch = globalThis.fetch;
+    const id = "12345678-1234-4234-8234-123456789abe";
+    const assetRoot = path.join(workRoot, "assets");
+    const temporaryAssetRoot = path.join(assetRoot, id);
+    const localAsset = createHash("sha256").update("scene").digest("hex") + ".jpg";
+    try {
+      process.env.AWS_ENDPOINT_URL = "https://objects.example.test";
+      process.env.AWS_S3_BUCKET_NAME = "nexus-private";
+      process.env.AWS_ACCESS_KEY_ID = "test-access";
+      process.env.AWS_SECRET_ACCESS_KEY = "test-secret";
+      process.env.AWS_DEFAULT_REGION = "auto";
+      process.env.AWS_S3_URL_STYLE = "virtual-host";
+
+      await mkdir(temporaryAssetRoot, { recursive: true });
+      await writeFile(path.join(temporaryAssetRoot, localAsset), "partial download");
+      const directory = path.join(workRoot, id);
+      await mkdir(directory, { recursive: true });
+      await writeFile(path.join(directory, "job.json"), JSON.stringify({
+        id,
+        tenantId: "tenant-a",
+        projectId: "project-1",
+        status: "queued",
+        createdAt: new Date().toISOString(),
+        ...validPayload(),
+      }));
+
+      const fakeFfmpeg = path.join(workRoot, "fake-ffmpeg");
+      await writeFile(fakeFfmpeg, "#!/usr/bin/env node\nconst fs = require('node:fs');\nfs.writeFileSync(process.argv.at(-1), 'fake mp4 output');\n");
+      await chmod(fakeFfmpeg, 0o700);
+      let assetFetches = 0;
+      globalThis.fetch = async (url, init) => {
+        if (String(url).startsWith("http://127.0.0.1:")) return originalFetch(url, init);
+        assetFetches += 1;
+        assert.equal(init.method, "GET");
+        return new Response(Buffer.from("restored private image"), { status: 200 });
+      };
+
+      const restarted = await startSignedServer(workRoot, { ffmpegPath: fakeFfmpeg });
+      try {
+        let job;
+        for (let attempt = 0; attempt < 200; attempt += 1) {
+          const response = await fetch(`${restarted.base}/jobs/${id}`, {
+            headers: signedHeader("tenant-a", "project-1", "render:read"),
+          });
+          assert.equal(response.status, 200);
+          job = await response.json();
+          if (job.status === "succeeded" || job.status === "failed") break;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        assert.equal(job.status, "succeeded");
+        // The API exposes the in-memory terminal state before the finally block
+        // has completed its cleanup and persisted the final job record. Wait for
+        // that durable record before closing the server and removing the fixture.
+        let persistedJob;
+        for (let attempt = 0; attempt < 200; attempt += 1) {
+          try {
+            persistedJob = JSON.parse(await readFile(path.join(workRoot, id, "job.json"), "utf8"));
+          } catch {
+            // The first atomic write may still be in progress.
+          }
+          if (persistedJob?.status === "succeeded") break;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        assert.equal(persistedJob?.status, "succeeded");
+        assert.equal(assetFetches, 1);
+      } finally {
+        await restarted.close();
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+});
+
+test("restart recovery ignores malformed persisted job manifests", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const id = "12345678-1234-4234-8234-123456789abc";
+    const directory = path.join(workRoot, id);
+    await mkdir(directory, { recursive: true });
+    await writeFile(path.join(directory, "job.json"), JSON.stringify({
+      id,
+      tenantId: null,
+      projectId: null,
+      status: "queued",
+      createdAt: new Date().toISOString(),
+      manifest: { unexpected: "unvalidated persisted data" },
+      assetMap: {},
+    }));
+    const restarted = await startServer(workRoot);
+    try {
+      const response = await fetch(`${restarted.base}/jobs/${id}`, {
+        headers: { authorization: `Bearer ${TOKEN}` },
+      });
+      assert.equal(response.status, 404);
+    } finally {
+      await restarted.close();
+    }
+  });
+});
+
+test("restart recovery rejects NUL bytes in persisted asset paths", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const id = "12345678-1234-4234-8234-123456789abd";
+    const directory = path.join(workRoot, id);
+    await mkdir(directory, { recursive: true });
+    const payload = validPayload();
+    payload.assetMap.scene = "scene\0.jpg";
+    await writeFile(path.join(directory, "job.json"), JSON.stringify({
+      id,
+      tenantId: null,
+      projectId: null,
+      status: "queued",
+      createdAt: new Date().toISOString(),
+      manifest: payload.manifest,
+      assetMap: payload.assetMap,
+    }));
+    const restarted = await startServer(workRoot);
+    try {
+      const response = await fetch(`${restarted.base}/jobs/${id}`, {
+        headers: { authorization: `Bearer ${TOKEN}` },
+      });
+      assert.equal(response.status, 404);
+    } finally {
+      await restarted.close();
+    }
+  });
+});
+
+test("restart recovery re-queues jobs interrupted while running", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const id = "00000000-0000-4000-8000-000000000099";
+    const assetRoot = path.join(workRoot, "assets");
+    const directory = path.join(workRoot, id);
+    await mkdir(assetRoot, { recursive: true });
+    await mkdir(directory, { recursive: true });
+    await writeFile(path.join(assetRoot, "scene.jpg"), "image");
+    const fakeFfmpeg = path.join(workRoot, "recovery-fake-ffmpeg");
+    await writeFile(fakeFfmpeg, [
+      "#!/usr/bin/env node",
+      "const fs = require('node:fs');",
+      "fs.writeFileSync(process.argv.at(-1), 'recovered mp4 output');",
+      "",
+    ].join("\n"));
+    await chmod(fakeFfmpeg, 0o700);
+    await writeFile(path.join(directory, "job.json"), JSON.stringify({
+      id,
+      tenantId: null,
+      projectId: null,
+      status: "running",
+      createdAt: new Date().toISOString(),
+      startedAt: new Date().toISOString(),
+      ...validPayload(),
+    }));
+
+    const restarted = await startServer(workRoot, { ffmpegPath: fakeFfmpeg });
+    try {
+      let job;
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        const response = await fetch(`${restarted.base}/jobs/${id}`, {
+          headers: { authorization: `Bearer ${TOKEN}` },
+        });
+        assert.equal(response.status, 200);
+        job = await response.json();
+        if (job.status === "succeeded" || job.status === "failed") break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.equal(job.status, "succeeded");
+      const output = await fetch(`${restarted.base}/jobs/${id}/output`, {
+        headers: { authorization: `Bearer ${TOKEN}` },
+      });
+      assert.equal(output.status, 200);
+      assert.equal(await output.text(), "recovered mp4 output");
+    } finally {
+      await restarted.close();
+    }
+  });
+});
+
+test("job status survives a render-service restart", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const first = await startServer(workRoot);
+    let jobId;
+    try {
+      const response = await fetch(`${first.base}/jobs`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${TOKEN}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(validPayload()),
+      });
+      assert.equal(response.status, 202);
+      jobId = (await response.json()).id;
+      await waitForFailedJob(first.base, jobId);
+      await waitForPersistedJob(workRoot, jobId, "failed");
+    } finally {
+      await first.close();
+    }
+
+    const orphanedTemp = path.join(workRoot, jobId, "job.12345678-1234-4234-8234-123456789abc.tmp");
+    await writeFile(orphanedTemp, "interrupted atomic write");
+    const restarted = await startServer(workRoot);
+    try {
+      const response = await fetch(`${restarted.base}/jobs/${jobId}`, {
+        headers: { authorization: `Bearer ${TOKEN}` },
+      });
+      assert.equal(response.status, 200);
+      // The first request waits for asynchronous recovery to finish.
+      assert.equal((await readdir(path.join(workRoot, jobId))).includes(path.basename(orphanedTemp)), false);
+      const job = await response.json();
+      assert.equal(job.id, jobId);
+      assert.equal(job.status, "failed");
+      assert.match(job.error, /ENOENT|asset/i);
+      assert.equal("manifest" in job, false);
+      assert.equal("assetMap" in job, false);
+    } finally {
+      await restarted.close();
+    }
+  });
+});
+
+test("signed render jobs are isolated by tenant and project", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const server = await startSignedServer(workRoot);
+    try {
+      const submitted = await fetch(`${server.base}/jobs`, {
+        method: "POST",
+        headers: { ...signedHeader("tenant-a", "project-1", "render:submit"), "content-type": "application/json" },
+        body: JSON.stringify(validPayload()),
+      });
+      assert.equal(submitted.status, 202);
+      const { id } = await submitted.json();
+      await waitForFailedJob(server.base, id, signedHeader("tenant-a", "project-1", "render:read"));
+
+      const wrongTenant = await fetch(`${server.base}/jobs/${id}`, {
+        headers: signedHeader("tenant-b", "project-1", "render:read"),
+      });
+      assert.equal(wrongTenant.status, 404);
+
+      const wrongProject = await fetch(`${server.base}/jobs/${id}`, {
+        headers: signedHeader("tenant-a", "project-2", "render:read"),
+      });
+      assert.equal(wrongProject.status, 404);
+
+      const owner = await fetch(`${server.base}/jobs/${id}`, {
+        headers: signedHeader("tenant-a", "project-1", "render:read"),
+      });
+      assert.equal(owner.status, 200);
+      const publicRecord = await owner.json();
+      assert.equal(publicRecord.id, id);
+      assert.equal("tenantId" in publicRecord, false);
+      assert.equal("projectId" in publicRecord, false);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("signed render API enforces separate submit and read scopes", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const server = await startSignedServer(workRoot);
+    try {
+      const denied = await fetch(`${server.base}/jobs`, {
+        method: "POST",
+        headers: { ...signedHeader("tenant-a", "project-1", "render:read"), "content-type": "application/json" },
+        body: JSON.stringify(validPayload()),
+      });
+      assert.equal(denied.status, 401);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("production mode refuses legacy shared bearer-token authentication", async () => {
+  assert.throws(
+    () => createRenderJobServer({
+      token: TOKEN,
+      signingSecret: "",
+      allowLegacyToken: false,
+      workRoot: path.join(os.tmpdir(), "nexus-render-production-auth-test"),
+    }),
+    /NEXUS_RENDER_SIGNING_SECRET is required when NODE_ENV=production/,
+  );
+});
+
+test("signed renderer auth-check confirms service-to-service credentials", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const server = await startSignedServer(workRoot);
+    try {
+      const response = await fetch(`${server.base}/auth-check`, {
+        headers: signedHeader("tenant-a", "project-1", "render:read"),
+      });
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), {
+        ok: true,
+        service: "nexus-render-jobs",
+        authorization: "signed",
+        scope: "render:read",
+      });
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("renderer auth-check refuses legacy credentials instead of claiming signed auth", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const server = await startServer(workRoot);
+    try {
+      const response = await fetch(`${server.base}/auth-check`, {
+        headers: { authorization: `Bearer ${TOKEN}` },
+      });
+      assert.equal(response.status, 401);
+      assert.deepEqual(await response.json(), { error: "signed authorization required" });
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+
+test("signed asset upload route rejects render scopes before touching object storage", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const server = await startSignedServer(workRoot);
+    try {
+      for (const scope of ["render:read", "render:submit"]) {
+        const response = await fetch(`${server.base}/assets/scene-1`, {
+          method: "PUT",
+          headers: {
+            ...signedHeader("tenant-a", "project-1", scope),
+            "content-type": "image/png",
+          },
+          body: Buffer.from("test-image"),
+        });
+        assert.equal(response.status, 401);
+        assert.deepEqual(await response.json(), { error: "unauthorized" });
+      }
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+
+test("signed asset-write authorization stores uploaded bytes in private object storage", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const keys = [
+      "AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME", "AWS_ACCESS_KEY_ID",
+      "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION", "AWS_S3_URL_STYLE",
+    ];
+    const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    const originalFetch = globalThis.fetch;
+    let storedRequest;
+    try {
+      process.env.AWS_ENDPOINT_URL = "https://objects.example.test";
+      process.env.AWS_S3_BUCKET_NAME = "nexus-private";
+      process.env.AWS_ACCESS_KEY_ID = "test-access";
+      process.env.AWS_SECRET_ACCESS_KEY = "test-secret";
+      process.env.AWS_DEFAULT_REGION = "auto";
+      process.env.AWS_S3_URL_STYLE = "virtual-host";
+      globalThis.fetch = async (url, init) => {
+        if (String(url).startsWith("http://127.0.0.1:")) return originalFetch(url, init);
+        const chunks = [];
+        for await (const chunk of init.body) chunks.push(Buffer.from(chunk));
+        storedRequest = {
+          url: String(url),
+          method: init.method,
+          body: Buffer.concat(chunks),
+          contentLength: new Headers(init.headers).get("content-length"),
+          payloadHash: new Headers(init.headers).get("x-amz-content-sha256"),
+          duplex: init.duplex,
+        };
+        return new Response(null, { status: 200 });
+      };
+
+      const server = await startSignedServer(workRoot);
+      try {
+        const bytes = Buffer.from("private-image-bytes");
+        const response = await originalFetch(`${server.base}/assets/scene-1`, {
+          method: "PUT",
+          headers: {
+            ...signedHeader("tenant-a", "project-1", "asset:write"),
+            "content-type": "image/png",
+          },
+          body: bytes,
+        });
+        assert.equal(response.status, 201);
+        assert.deepEqual(await response.json(), {
+          assetId: "scene-1",
+          filename: "scene-1.png",
+          bytes: bytes.length,
+          sha256: createHash("sha256").update(bytes).digest("hex"),
+          storage: "private_object_storage",
+        });
+        assert.equal(storedRequest.method, "PUT");
+        assert.deepEqual(storedRequest.body, bytes);
+        assert.equal(storedRequest.contentLength, String(bytes.length));
+        assert.equal(storedRequest.payloadHash, createHash("sha256").update(bytes).digest("hex"));
+        assert.equal(storedRequest.duplex, "half");
+        assert.ok(storedRequest.url.startsWith("https://nexus-private.objects.example.test/assets/tenant-a/project-1/"));
+
+        const stagedBytes = Buffer.from("temporary-video-bytes");
+        const stagedResponse = await originalFetch(`${server.base}/staged-assets/video-1`, {
+          method: "PUT",
+          headers: {
+            ...signedHeader("tenant-a", "project-1", "asset:write"),
+            "content-type": "video/mp4",
+          },
+          body: stagedBytes,
+        });
+        const stagedResult = await stagedResponse.json();
+        assert.equal(stagedResponse.status, 201, JSON.stringify(stagedResult));
+        assert.equal(stagedResult.filename, "video-1.mp4");
+        assert.equal(storedRequest.method, "PUT");
+        assert.deepEqual(storedRequest.body, stagedBytes);
+        assert.ok(storedRequest.url.startsWith("https://nexus-private.objects.example.test/staged-assets/tenant-a/project-1/"));
+        const stagedImage = await originalFetch(`${server.base}/staged-assets/not-a-video`, {
+          method: "PUT",
+          headers: {
+            ...signedHeader("tenant-a", "project-1", "asset:write"),
+            "content-type": "image/png",
+          },
+          body: Buffer.from("not-a-video"),
+        });
+        assert.equal(stagedImage.status, 415);
+      } finally {
+        await server.close();
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+});
+
+
+test("signed asset upload rejects an oversized declared body before reading it", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const server = await startSignedServer(workRoot);
+    try {
+      const result = await new Promise((resolve, reject) => {
+        const request = httpRequest(server.base + "/assets/scene-too-large", {
+          method: "PUT",
+          headers: {
+            ...signedHeader("tenant-a", "project-1", "asset:write"),
+            "content-type": "image/png",
+            "content-length": String(100 * 1024 * 1024 + 1),
+          },
+        }, (response) => {
+          const chunks = [];
+          response.on("data", (chunk) => chunks.push(chunk));
+          response.on("end", () => resolve({
+            status: response.statusCode,
+            body: Buffer.concat(chunks).toString("utf8"),
+          }));
+        });
+        request.on("error", reject);
+        request.end();
+      });
+      assert.equal(result.status, 413);
+      assert.deepEqual(JSON.parse(result.body), { error: "Asset exceeds the configured 100 MiB limit." });
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+
+test("disk-backed asset uploads enforce a two-upload concurrency limit", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const keys = [
+      "AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME", "AWS_ACCESS_KEY_ID",
+      "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION", "AWS_S3_URL_STYLE",
+    ];
+    const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    const originalFetch = globalThis.fetch;
+    let storageCalls = 0;
+    let releaseUploads;
+    const uploadsMayFinish = new Promise((resolve) => { releaseUploads = resolve; });
+    let resolveTwoStarted;
+    const twoStarted = new Promise((resolve) => { resolveTwoStarted = resolve; });
+    try {
+      process.env.AWS_ENDPOINT_URL = "https://objects.example.test";
+      process.env.AWS_S3_BUCKET_NAME = "nexus-private";
+      process.env.AWS_ACCESS_KEY_ID = "test-access";
+      process.env.AWS_SECRET_ACCESS_KEY = "test-secret";
+      process.env.AWS_DEFAULT_REGION = "auto";
+      process.env.AWS_S3_URL_STYLE = "virtual-host";
+      globalThis.fetch = async (url, init) => {
+        if (String(url).startsWith("http://127.0.0.1:")) return originalFetch(url, init);
+        for await (const _chunk of init.body) { /* consume the streamed file */ }
+        storageCalls += 1;
+        if (storageCalls === 2) resolveTwoStarted();
+        await uploadsMayFinish;
+        return new Response(null, { status: 200 });
+      };
+
+      const server = await startSignedServer(workRoot);
+      try {
+        const sendUpload = (assetId) => originalFetch(server.base + "/assets/" + assetId, {
+          method: "PUT",
+          headers: {
+            ...signedHeader("tenant-a", "project-1", "asset:write"),
+            "content-type": "image/png",
+          },
+          body: Buffer.from("small-test-asset"),
+        });
+        const first = sendUpload("scene-one");
+        const second = sendUpload("scene-two");
+        await twoStarted;
+        const third = await sendUpload("scene-three");
+        assert.equal(third.status, 429);
+        assert.deepEqual(await third.json(), { error: "asset upload capacity is full" });
+        releaseUploads();
+        const results = await Promise.all([first, second]);
+        assert.deepEqual(results.map((response) => response.status), [201, 201]);
+      } finally {
+        releaseUploads();
+        await server.close();
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+});
+
+
+test("disk-backed asset upload removes its temporary file when private storage fails", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const tempRoot = path.join(workRoot, "upload-temp");
+    await mkdir(tempRoot, { mode: 0o700 });
+    const keys = [
+      "AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME", "AWS_ACCESS_KEY_ID",
+      "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION", "AWS_S3_URL_STYLE",
+    ];
+    const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    const originalFetch = globalThis.fetch;
+    try {
+      process.env.AWS_ENDPOINT_URL = "https://objects.example.test";
+      process.env.AWS_S3_BUCKET_NAME = "nexus-private";
+      process.env.AWS_ACCESS_KEY_ID = "test-access";
+      process.env.AWS_SECRET_ACCESS_KEY = "test-secret";
+      process.env.AWS_DEFAULT_REGION = "auto";
+      process.env.AWS_S3_URL_STYLE = "virtual-host";
+      globalThis.fetch = async (url, init) => {
+        if (String(url).startsWith("http://127.0.0.1:")) return originalFetch(url, init);
+        for await (const _chunk of init.body) { /* consume the streamed file */ }
+        return new Response(null, { status: 503 });
+      };
+      const server = await startSignedServer(workRoot, { assetTempRoot: tempRoot });
+      try {
+        const response = await originalFetch(server.base + "/assets/cleanup-check", {
+          method: "PUT",
+          headers: {
+            ...signedHeader("tenant-a", "project-1", "asset:write"),
+            "content-type": "image/png",
+          },
+          body: Buffer.from("temporary-upload-data"),
+        });
+        assert.equal(response.status, 502);
+        assert.match((await response.json()).error, /storage rejected asset upload/);
+        assert.deepEqual(await readdir(tempRoot), []);
+      } finally {
+        await server.close();
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+});
+
+
+test("staged asset range reads require the dedicated signed asset:read scope", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const instance = await startSignedServer(workRoot);
+    try {
+      const noAuth = await fetch(`${instance.base}/staged-assets/video-1/mp4`, {
+        headers: { range: "bytes=0-2" },
+      });
+      assert.equal(noAuth.status, 401);
+      const wrongScope = await fetch(`${instance.base}/staged-assets/video-1/mp4`, {
+        headers: { ...signedHeader("tenant-a", "project-a", "render:read"), range: "bytes=0-2" },
+      });
+      assert.equal(wrongScope.status, 401);
+      const invalidRange = await fetch(`${instance.base}/staged-assets/video-1/mp4`, {
+        headers: { ...signedHeader("tenant-a", "project-a", "asset:read"), range: "bytes=0-" },
+      });
+      assert.equal(invalidRange.status, 400);
+      assert.match((await invalidRange.json()).error, /explicit byte range/);
+    } finally {
+      await instance.close();
+    }
+  });
+});
+
+
+test("staged asset deletion requires asset:delete scope and deletes only the signed tenant/project object", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const keys = ["AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION"];
+    const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    const originalFetch = globalThis.fetch;
+    let storageRequest;
+    try {
+      process.env.AWS_ENDPOINT_URL = "https://objects.example.test";
+      process.env.AWS_S3_BUCKET_NAME = "nexus-private";
+      process.env.AWS_ACCESS_KEY_ID = "test-access";
+      process.env.AWS_SECRET_ACCESS_KEY = "test-secret";
+      process.env.AWS_DEFAULT_REGION = "auto";
+      globalThis.fetch = async (url, init) => {
+        storageRequest = { url: String(url), method: init.method, authorization: init.headers.get("authorization") };
+        return new Response(null, { status: 204 });
+      };
+      const instance = await startSignedServer(workRoot);
+      try {
+        const token = signedHeader("tenant-cleanup", "project-cleanup", "asset:delete").authorization;
+        assert.equal(
+          verifyRenderToken(token.slice("Bearer ".length), { secret: SIGNING_SECRET, scope: "asset:delete" })?.tenantId,
+          "tenant-cleanup",
+        );
+        const result = await new Promise((resolve, reject) => {
+          const req = httpRequest(instance.base + "/staged-assets/asset-123/mp4", {
+            method: "DELETE",
+            headers: { authorization: token },
+          }, (response) => {
+            let body = "";
+            response.setEncoding("utf8");
+            response.on("data", (chunk) => { body += chunk; });
+            response.on("end", () => resolve({ status: response.statusCode, body }));
+          });
+          req.on("error", reject);
+          req.end();
+        });
+        assert.equal(result.status, 200);
+        assert.deepEqual(JSON.parse(result.body), { deleted: true });
+        assert.equal(storageRequest.method, "DELETE");
+        assert.match(storageRequest.url, /staged-assets\/tenant-cleanup\/project-cleanup\//);
+        assert.match(storageRequest.authorization, /^AWS4-HMAC-SHA256/);
+      } finally {
+        await instance.close();
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+});
+
+
+test("runs the staged-object cleanup sweep at startup and stops its timer on shutdown", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const previousBucket = process.env.AWS_S3_BUCKET_NAME;
+    process.env.AWS_S3_BUCKET_NAME = "nexus-private";
+    let calls = 0;
+    const server = createRenderJobServer({
+      token: "",
+      signingSecret: SIGNING_SECRET,
+      assetRoot: path.join(workRoot, "assets"),
+      workRoot,
+      cleanupEnabled: true,
+      cleanupIntervalMs: 15 * 60 * 1000,
+      cleanupFn: async () => {
+        calls += 1;
+        return { scanned: 2, deleted: 1, pages: 1, truncated: false };
+      },
+    });
+    try {
+      await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+      for (let attempt = 0; attempt < 100 && calls === 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      assert.equal(calls, 1);
+    } finally {
+      await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+      if (previousBucket === undefined) delete process.env.AWS_S3_BUCKET_NAME;
+      else process.env.AWS_S3_BUCKET_NAME = previousBucket;
+    }
+  });
+});
+
+test("rejects unsafe staged cleanup scheduler intervals", async () => {
+  await withWorkRoot(async (workRoot) => {
+    assert.throws(() => createRenderJobServer({
+      token: "",
+      signingSecret: SIGNING_SECRET,
+      workRoot,
+      cleanupEnabled: true,
+      cleanupIntervalMs: 1000,
+    }), /at least 15 minutes/);
+  });
+});
+
+test("requires bucket configuration when staged cleanup is enabled", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const previousBucket = process.env.AWS_S3_BUCKET_NAME;
+    delete process.env.AWS_S3_BUCKET_NAME;
+    try {
+      assert.throws(() => createRenderJobServer({
+        token: "",
+        signingSecret: SIGNING_SECRET,
+        workRoot,
+        cleanupEnabled: true,
+      }), /requires AWS_S3_BUCKET_NAME/);
+    } finally {
+      if (previousBucket === undefined) delete process.env.AWS_S3_BUCKET_NAME;
+      else process.env.AWS_S3_BUCKET_NAME = previousBucket;
+    }
+  });
+});
+
+
+test("private staged asset denials are normalized to not-found for reads and deletes", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const keys = ["AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION"];
+    const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    const originalFetch = globalThis.fetch;
+    process.env.AWS_ENDPOINT_URL = "https://objects.example.test";
+    process.env.AWS_S3_BUCKET_NAME = "nexus-private";
+    process.env.AWS_ACCESS_KEY_ID = "test-access";
+    process.env.AWS_SECRET_ACCESS_KEY = "test-secret";
+    process.env.AWS_DEFAULT_REGION = "auto";
+    const instance = await startSignedServer(workRoot);
+    globalThis.fetch = async (url, init) => {
+      if (String(url).startsWith(instance.base)) return originalFetch(url, init);
+      return new Response("AccessDenied", { status: 403 });
+    };
+    try {
+      const read = await originalFetch(instance.base + "/staged-assets/hidden-video/mp4", {
+        headers: { ...signedHeader("tenant-a", "project-a", "asset:read"), range: "bytes=0-3" },
+      });
+      assert.equal(read.status, 404);
+      const deletion = await originalFetch(instance.base + "/staged-assets/hidden-video/mp4", {
+        method: "DELETE",
+        headers: signedHeader("tenant-a", "project-a", "asset:delete"),
+      });
+      assert.equal(deletion.status, 404);
+      assert.deepEqual(await deletion.json(), { error: "staged asset not found" });
+    } finally {
+      globalThis.fetch = originalFetch;
+      await instance.close();
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+});
+
+
+
+test("staged asset stream failures are handled without crashing the renderer", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const keys = ["AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION"];
+    const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    const originalFetch = globalThis.fetch;
+    for (const [key, value] of Object.entries({
+      AWS_ENDPOINT_URL: "https://objects.example.test",
+      AWS_S3_BUCKET_NAME: "nexus-private",
+      AWS_ACCESS_KEY_ID: "test-access",
+      AWS_SECRET_ACCESS_KEY: "test-secret",
+      AWS_DEFAULT_REGION: "auto",
+    })) process.env[key] = value;
+    const instance = await startSignedServer(workRoot);
+    globalThis.fetch = async (url, init) => {
+      if (String(url).startsWith(instance.base)) return originalFetch(url, init);
+      const body = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new Uint8Array([1]));
+          queueMicrotask(() => controller.error(new Error("simulated upstream stream failure")));
+        },
+      });
+      return new Response(body, {
+        status: 206,
+        headers: { "content-range": "bytes 0-2/10", "content-length": "3" },
+      });
+    };
+    try {
+      await assert.rejects(async () => {
+        const response = await originalFetch(instance.base + "/staged-assets/video-1/mp4", {
+          headers: { ...signedHeader("tenant-a", "project-a", "asset:read"), range: "bytes=0-2" },
+        });
+        await response.arrayBuffer();
+      });
+      const health = await originalFetch(instance.base + "/health");
+      assert.equal(health.status, 200);
+    } finally {
+      globalThis.fetch = originalFetch;
+      await instance.close();
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+});
+
+
+test("render submission idempotency deduplicates concurrent and recovered requests", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const instance = await startServer(workRoot);
+    const idempotencyKey = createHash("sha256").update("project-revision-7").digest("hex");
+    const payload = { ...validPayload(), idempotencyKey };
+    let firstId;
+    try {
+      const submit = () => fetch(`${instance.base}/jobs`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const [first, concurrent] = await Promise.all([submit(), submit()]);
+      assert.equal(first.status, 202);
+      assert.equal(concurrent.status, 202);
+      const firstResult = await first.json();
+      const concurrentResult = await concurrent.json();
+      assert.equal(concurrentResult.id, firstResult.id);
+      assert.equal(concurrentResult.deduplicated, true);
+      firstId = firstResult.id;
+      const failedJob = await waitForFailedJob(instance.base, firstId);
+      assert.equal(failedJob.status, "failed");
+      assert.equal("idempotencyKey" in failedJob, false);
+    } finally {
+      await instance.close();
+    }
+
+    const restarted = await startServer(workRoot);
+    try {
+      const replay = await fetch(`${restarted.base}/jobs`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      assert.equal(replay.status, 202);
+      const replayResult = await replay.json();
+      assert.equal(replayResult.id, firstId);
+      assert.equal(replayResult.deduplicated, true);
+      const directories = (await readdir(workRoot, { withFileTypes: true }))
+        .filter((entry) => entry.isDirectory() && /^[0-9a-f-]{36}$/i.test(entry.name));
+      assert.equal(directories.length, 1);
+    } finally {
+      await restarted.close();
+    }
+  });
+});
+
+test("render submission rejects malformed idempotency keys", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const instance = await startServer(workRoot);
+    try {
+      const response = await fetch(`${instance.base}/jobs`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify({ ...validPayload(), idempotencyKey: "not-a-digest" }),
+      });
+      assert.equal(response.status, 400);
+      assert.match((await response.json()).error, /idempotencyKey/);
+    } finally {
+      await instance.close();
+    }
+  });
+});

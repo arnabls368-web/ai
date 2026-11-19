@@ -3,14 +3,25 @@
 declare namespace Cloudflare {
 	interface Env {
 		MCP_RESOURCE: string;
+		OAUTH_KV: KVNamespace;
+		OAUTH_STATE: DurableObjectNamespace;
+		GOOGLE_CLIENT_ID: string;
+		GOOGLE_CLIENT_SECRET: string;
+		COOKIE_ENCRYPTION_KEY: string;
+		HOSTED_DOMAIN: string;
+		NEXUS_RENDERER_URL?: string;
+		NEXUS_RENDER_SIGNING_SECRET?: string;
 	}
 }
 
 interface Env {
   MCP_RESOURCE: string;
   OAUTH_KV: KVNamespace;
+  OAUTH_STATE: DurableObjectNamespace;
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
   COOKIE_ENCRYPTION_KEY: string;
   HOSTED_DOMAIN: string;
+  NEXUS_RENDERER_URL?: string;
+  NEXUS_RENDER_SIGNING_SECRET?: string;
 }
