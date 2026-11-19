@@ -31,6 +31,8 @@ The renderer is intentionally a single-process, single-replica service. Its queu
 
 ## Verification status and production gates
 
+See the [production rollout runbook](./PRODUCTION-ROLLOUT.md) for the staged Cloudflare Durable Object migration, Railway cleanup enablement, private-storage verification and YouTube OAuth gates. The runbook is a checklist, not deployment authorization.
+
 Automated checks cover the Worker type-check/build, approval decision helper, upload-source validation, renderer unit tests, Docker build, FFmpeg smoke encode, non-root startup and persistent-volume behavior. Storage tests use a mocked S3-compatible endpoint.
 
 External video URL uploads are disabled by default. To enable them, set the Worker variable `YOUTUBE_UPLOAD_ALLOWED_HOSTS` to a comma-separated list of exact, operator-approved hostnames (for example, `media.example.org,cdn.example.net`). Matching is exact; wildcard and parent-domain matching are not supported. Keep the list narrow and use HTTPS-only origins. NEXUS render-job uploads do not use this external-host allowlist.
@@ -48,7 +50,7 @@ A healthy `/health` endpoint proves process liveness only. It does not prove sto
 
 ### Railway volume prerequisite
 
-The renderer image runs Node as the unprivileged `node` user. Railway mounts persistent volumes as root; the current entrypoint therefore expects `RAILWAY_RUN_UID=0` so it can initialize only the `/work` and `/assets` mount roots, then drop privileges with `gosu`. The currently configured Railway service does not yet have that variable set. **Do not deploy this renderer image to that service until the prerequisite is configured and the rollout is explicitly approved.** Existing job data is not recursively chowned.
+The repository Dockerfile runs Node as the unprivileged `node` user. If the Railway service is deliberately switched from its current Railpack builder to this Dockerfile, review volume ownership and set `RAILWAY_RUN_UID=0` so the entrypoint can initialize only the `/work` and `/assets` mount roots before dropping privileges with `gosu`. The current Railway service uses Railpack, so this Dockerfile-specific setting is not currently active. Do not switch builders or deploy a changed renderer without an explicitly approved rollout. Existing job data is not recursively chowned.
 
 ## Local development
 
@@ -137,6 +139,6 @@ vidIQ provides a separate hosted remote MCP endpoint at `https://mcp.vidiq.com/m
 - The source is streamed into private account-scoped staging; its size and SHA-256 are verified from the renderer storage path.
 - Before starting a YouTube upload session, the tool requests interactive approval bound to the connected Google account, video SHA-256, title, description and privacy setting.
 - After approval, the uploader fetches bounded byte ranges from private staging and sends them through a resumable YouTube session; interrupted transfers query the acknowledged upload offset before retrying.
-- Staged objects are explicitly deleted after the tool operation where possible. Configure a bucket lifecycle expiry as a fallback for worker termination or network failure.
+- Staged objects are explicitly deleted after the tool operation where possible. The Railway renderer's bounded scheduled sweep is the fallback for worker termination or network failure: it deletes only expired video objects under `staged-assets/`. Railway Buckets do not currently support the lifecycle policy needed here; do not apply a bucket-wide expiry because it could delete permanent assets.
 - A decline, cancellation, missing approval context, or unsupported approval flow does not start an upload.
 - No video is uploaded during planning, research, asset generation, rendering or readiness checks.
