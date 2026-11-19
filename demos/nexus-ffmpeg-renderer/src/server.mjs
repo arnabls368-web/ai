@@ -306,7 +306,9 @@ export function createRenderJobServer({
       }
       const isSubmission = request.method === "POST" && url.pathname === "/jobs";
       const assetMatch = request.method === "PUT" ? url.pathname.match(/^\/assets\/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})$/) : null;
+      const assetReadMatch = request.method === "GET" ? url.pathname.match(/^\/assets\/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})\/(mp4|mov|m4v|webm|mkv)$/) : null;
       const isAssetUpload = Boolean(assetMatch);
+      const isAssetRead = Boolean(assetReadMatch);
       const claims = requestClaims(request, {
         signingSecret,
         legacyToken: allowLegacyToken ? token : undefined,
@@ -323,7 +325,7 @@ export function createRenderJobServer({
       if (isAssetRead) {
         if (claims.legacy || !claims.tenantId || !claims.projectId) return json(response, 401, { error: "signed project authorization required" });
         const rangeHeader = request.headers.range ?? "";
-        const rangeMatch = rangeHeader.match(/^bytes=(\\d+)-(\\d+)$/);
+        const rangeMatch = rangeHeader.match(/^bytes=(\d+)-(\d+)$/);
         if (!rangeMatch) return json(response, 400, { error: "a single explicit byte range is required" });
         const start = Number(rangeMatch[1]);
         const end = Number(rangeMatch[2]);
@@ -352,7 +354,6 @@ export function createRenderJobServer({
           return;
         } catch (error) {
           if (error.status === 404 || error.status === 416) {
-            response.setHeader("content-range", error.status === 416 ? "bytes */*" : "");
             return json(response, error.status, { error: error.message });
           }
           return json(response, 502, { error: "private staged asset could not be read" });
