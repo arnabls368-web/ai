@@ -49,11 +49,13 @@ test("validates persisted fal.ai job records and normalizes trusted queue URLs",
     requestId: "4d1f2c8e-0d7b-4d6e-9a2a-1f8e2f2d6a01",
     statusUrl: "https://queue.fal.run/fal-ai/example-model/requests/abc/status",
     responseUrl: "https://queue.fal.run/fal-ai/example-model/requests/abc",
+    cancelUrl: "https://queue.fal.run/fal-ai/example-model/requests/abc/cancel",
     createdAt: "2026-11-19T06:00:00.000Z",
   }, "4d1f2c8e-0d7b-4d6e-9a2a-1f8e2f2d6a01");
   assert.equal(record.endpointId, "fal-ai/example-model");
   assert.equal(record.statusUrl, "https://queue.fal.run/fal-ai/example-model/requests/abc/status");
   assert.equal(record.responseUrl, "https://queue.fal.run/fal-ai/example-model/requests/abc");
+  assert.equal(record.cancelUrl, "https://queue.fal.run/fal-ai/example-model/requests/abc/cancel");
 });
 
 test("rejects missing, mismatched, malformed, or untrusted persisted job records", () => {
@@ -73,6 +75,8 @@ test("rejects missing, mismatched, malformed, or untrusted persisted job records
     { ...valid, statusUrl: "https://attacker.example/status" },
     { ...valid, responseUrl: "http://queue.fal.run/result" },
     { ...valid, responseUrl: "https://queue.fal.run/result?token=unexpected" },
+    { ...valid, cancelUrl: "https://attacker.example/cancel" },
+    { ...valid, cancelUrl: "http://queue.fal.run/cancel" },
   ]) {
     assert.throws(
       () => validateFalJobRecord(record, valid.requestId),
