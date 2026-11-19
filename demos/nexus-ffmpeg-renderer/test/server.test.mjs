@@ -1339,3 +1339,65 @@ test("staged asset stream failures are handled without crashing the renderer", a
     }
   });
 });
+
+
+test("render submission idempotency deduplicates concurrent and recovered requests", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const instance = await startServer(workRoot);
+    const idempotencyKey = createHash("sha256").update("project-revision-7").digest("hex");
+    const payload = { ...validPayload(), idempotencyKey };
+    let firstId;
+    try {
+      const submit = () => fetch(`${instance.base}/jobs`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const [first, concurrent] = await Promise.all([submit(), submit()]);
+      assert.equal(first.status, 202);
+      assert.equal(concurrent.status, 202);
+      const firstResult = await first.json();
+      const concurrentResult = await concurrent.json();
+      assert.equal(concurrentResult.id, firstResult.id);
+      firstId = firstResult.id;
+      assert.equal((await waitForFailedJob(instance.base, firstId)).status, "failed");
+    } finally {
+      await instance.close();
+    }
+
+    const restarted = await startServer(workRoot);
+    try {
+      const replay = await fetch(`${restarted.base}/jobs`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      assert.equal(replay.status, 202);
+      const replayResult = await replay.json();
+      assert.equal(replayResult.id, firstId);
+      assert.equal(replayResult.deduplicated, true);
+      const directories = (await readdir(workRoot, { withFileTypes: true }))
+        .filter((entry) => entry.isDirectory() && /^[0-9a-f-]{36}$/i.test(entry.name));
+      assert.equal(directories.length, 1);
+    } finally {
+      await restarted.close();
+    }
+  });
+});
+
+test("render submission rejects malformed idempotency keys", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const instance = await startServer(workRoot);
+    try {
+      const response = await fetch(`${instance.base}/jobs`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify({ ...validPayload(), idempotencyKey: "not-a-digest" }),
+      });
+      assert.equal(response.status, 400);
+      assert.match((await response.json()).error, /idempotencyKey/);
+    } finally {
+      await instance.close();
+    }
+  });
+});
