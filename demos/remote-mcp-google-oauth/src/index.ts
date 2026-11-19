@@ -57,49 +57,57 @@ async function uploadToYouTube(
     status: { privacyStatus },
   };
 
-  const startUpload = async (token: string) => {
-    const start = await fetch(
-      "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json; charset=UTF-8",
-          "X-Upload-Content-Type": mimeType,
-          "X-Upload-Content-Length": String(totalBytes),
+  const startUpload = async (
+    token: string,
+    existingUploadUrl?: string,
+    checkStatusFirst = false,
+  ) => {
+    let uploadUrl = existingUploadUrl;
+    if (!uploadUrl) {
+      const start = await fetch(
+        "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json; charset=UTF-8",
+            "X-Upload-Content-Type": mimeType,
+            "X-Upload-Content-Length": String(totalBytes),
+          },
+          body: JSON.stringify(metadata),
+          redirect: "error",
+          signal: AbortSignal.timeout(30_000),
         },
-        body: JSON.stringify(metadata),
-        redirect: "error",
-        signal: AbortSignal.timeout(30_000),
-      },
-    );
-    if (!start.ok) return { response: start };
-    const uploadUrl = start.headers.get("Location");
-    if (!uploadUrl) throw new Error("YouTube did not return an upload URL");
+      );
+      if (!start.ok) return { response: start, uploadUrl: undefined };
+      uploadUrl = start.headers.get("Location") ?? undefined;
+      if (!uploadUrl) throw new Error("YouTube did not return an upload URL");
 
-    // The resumable URL is returned by Google's authenticated API. Validate
-    // its origin before forwarding the user's OAuth bearer token to it.
-    let parsedUploadUrl: URL;
-    try {
-      parsedUploadUrl = new URL(uploadUrl);
-    } catch {
-      throw new Error("YouTube returned an invalid resumable upload URL.");
-    }
-    if (parsedUploadUrl.protocol !== "https:" ||
-        parsedUploadUrl.hostname !== "www.googleapis.com" ||
-        parsedUploadUrl.port || parsedUploadUrl.username ||
-        parsedUploadUrl.password || parsedUploadUrl.hash) {
-      throw new Error("YouTube returned an unexpected upload URL; refusing to send authorization credentials.");
+      // Validate Google's session URL before forwarding the OAuth bearer token.
+      let parsedUploadUrl: URL;
+      try {
+        parsedUploadUrl = new URL(uploadUrl);
+      } catch {
+        throw new Error("YouTube returned an invalid resumable upload URL.");
+      }
+      if (parsedUploadUrl.protocol !== "https:" ||
+          parsedUploadUrl.hostname !== "www.googleapis.com" ||
+          parsedUploadUrl.port || parsedUploadUrl.username ||
+          parsedUploadUrl.password || parsedUploadUrl.hash) {
+        throw new Error("YouTube returned an unexpected upload URL; refusing to send authorization credentials.");
+      }
+      uploadUrl = parsedUploadUrl.toString();
     }
 
     const uploaded = await uploadResumableVideoFromRanges({
-      uploadUrl: parsedUploadUrl.toString(),
+      uploadUrl,
       totalBytes,
       readRange,
       mimeType,
       accessToken: token,
+      checkStatusFirst,
     });
-    return { response: uploaded };
+    return { response: uploaded, uploadUrl };
   };
 
   let result = await startUpload(initialAccessToken);
@@ -111,7 +119,11 @@ async function uploadToYouTube(
       env.GOOGLE_CLIENT_SECRET,
     );
     if (!renewed) throw new Error("Google authorization expired. Please reconnect YouTube.");
-    result = await startUpload(renewed);
+    // If the session was already created and a chunk got a 401, query that
+    // same session first so we resume at Google's acknowledged byte offset.
+    result = result.uploadUrl
+      ? await startUpload(renewed, result.uploadUrl, true)
+      : await startUpload(renewed);
   }
   if (!result.response.ok) {
     const status = result.response.status;
