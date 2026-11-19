@@ -482,3 +482,48 @@ test("staged asset cleanup rejects unsafe limits and fails closed on listing err
     }
   }
 });
+
+
+test("paginates staged object listings with safely encoded continuation tokens", async () => {
+  const keys = ["AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION"];
+  const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  const originalFetch = globalThis.fetch;
+  const now = Date.parse("2026-11-19T04:00:00.000Z");
+  const urls = [];
+  const deleted = [];
+  try {
+    process.env.AWS_ENDPOINT_URL = "https://objects.example.test";
+    process.env.AWS_S3_BUCKET_NAME = "nexus-private";
+    process.env.AWS_ACCESS_KEY_ID = "test-access";
+    process.env.AWS_SECRET_ACCESS_KEY = "test-secret";
+    process.env.AWS_DEFAULT_REGION = "auto";
+    globalThis.fetch = async (url, init) => {
+      urls.push(String(url));
+      if (init.method === "DELETE") {
+        deleted.push(String(url));
+        return new Response(null, { status: 204 });
+      }
+      if (urls.filter((value) => value.includes("list-type")).length === 1) {
+        return new Response("<ListBucketResult><IsTruncated>true</IsTruncated><NextContinuationToken>next&amp;token/+part</NextContinuationToken></ListBucketResult>");
+      }
+      return new Response(
+        "<ListBucketResult><IsTruncated>false</IsTruncated>" +
+        "<Contents><Key>staged-assets/tenant/project/expired.mkv</Key><LastModified>2026-11-18T00:00:00.000Z</LastModified></Contents>" +
+        "</ListBucketResult>",
+      );
+    };
+    const { cleanupStagedAssets } = await import("../src/storage.mjs");
+    const result = await cleanupStagedAssets({ olderThanMs: 3 * 60 * 60 * 1000, now });
+    assert.deepEqual(result, { scanned: 1, deleted: 1, pages: 2, truncated: false });
+    assert.equal(urls.filter((value) => value.includes("list-type")).length, 2);
+    const secondPage = new URL(urls.filter((value) => value.includes("list-type"))[1]);
+    assert.equal(secondPage.searchParams.get("continuation-token"), "next&token/+part");
+    assert.equal(deleted.length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
