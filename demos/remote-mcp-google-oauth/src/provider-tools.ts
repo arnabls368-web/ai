@@ -244,6 +244,7 @@ export function registerProviderTools(server: McpServer) {
           requestId: submitted.request_id,
           statusUrl: trustedFalUrl(submitted.status_url),
           responseUrl: trustedFalUrl(submitted.response_url),
+          ...(typeof submitted.cancel_url === "string" ? { cancelUrl: trustedFalUrl(submitted.cancel_url) } : {}),
           createdAt: new Date().toISOString(),
         };
         await env.OAUTH_KV.put(`nexus:fal-jobs:v1:${scope}:${submitted.request_id}`, JSON.stringify(record), { expirationTtl: 60 * 60 * 24 * 7 });
@@ -297,6 +298,50 @@ export function registerProviderTools(server: McpServer) {
         }, "fal.ai");
         await env.OAUTH_KV.put(key, JSON.stringify({ ...job, completedAt: new Date().toISOString(), completed: true }), { expirationTtl: 60 * 60 * 24 * 7 });
         return result({ status: "COMPLETED", endpointId: job.endpointId, requestId, output });
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "nexus_cancel_media_generation",
+    {
+      description: "Request cancellation of a fal.ai generation job submitted by the signed-in Google account. A queued job may be removed; an in-progress runner receives a cancellation signal, but stopping is model-dependent. Does not cancel or refund work already completed.",
+      inputSchema: z.object({ requestId: z.string().uuid() }),
+    },
+    async ({ requestId }) => {
+      try {
+        const apiKey = secret("FAL_KEY");
+        if (!apiKey) throw new Error("fal.ai is not configured on this Worker. Add FAL_KEY as a Cloudflare Worker secret.");
+        const scope = await accountScope();
+        const key = "nexus:fal-jobs:v1:" + scope + ":" + requestId;
+        const job = await env.OAUTH_KV.get<{ endpointId: string; requestId: string; statusUrl: string; responseUrl: string; cancelUrl?: string; createdAt: string }>(key, "json");
+        if (!job) throw new Error("fal.ai job not found for this account, or its 7-day tracking record expired.");
+        const validatedJob = validateFalJobRecord(job, requestId);
+        if (!validatedJob.cancelUrl) {
+          throw new Error("This job predates cancellation support and has no saved fal.ai cancellation URL. It can still be checked with nexus_get_media_generation.");
+        }
+        const cancellation = await providerJson(validatedJob.cancelUrl, {
+          method: "PUT",
+          headers: { Authorization: "Key " + apiKey, Accept: "application/json" },
+        }, "fal.ai cancellation");
+        const status = cancellation.status;
+        if (!["OK", "CANCELLATION_REQUESTED", "ALREADY_COMPLETED", "NOT_FOUND"].includes(status)) {
+          throw new Error("fal.ai returned an unexpected cancellation status.");
+        }
+        return result({
+          status,
+          requestId,
+          endpointId: validatedJob.endpointId,
+          note: status === "CANCELLATION_REQUESTED"
+            ? "Cancellation was requested. Check the same request ID; an in-progress model runner may take time to stop."
+            : status === "ALREADY_COMPLETED"
+              ? "The generation had already completed; cancellation did not undo the completed work or its charges."
+              : status === "NOT_FOUND"
+                ? "fal.ai could not find this request; check its status using the same request ID."
+                : "fal.ai accepted the cancellation request.",
+        });
       } catch (error) {
         return failure(error);
       }
