@@ -135,8 +135,14 @@ export function createRenderJobServer({
     await chmod(directory, 0o700);
     const destination = path.join(directory, "job.json");
     const temporary = path.join(directory, `job.${randomUUID()}.tmp`);
-    await writeFile(temporary, JSON.stringify(job), { mode: 0o600 });
-    await rename(temporary, destination);
+    try {
+      await writeFile(temporary, JSON.stringify(job), { mode: 0o600 });
+      await rename(temporary, destination);
+    } finally {
+      // A failed write or rename must not leave private job metadata fragments
+      // behind on the persistent volume.
+      await rm(temporary, { force: true });
+    }
   }
 
   async function pruneJobs() {
