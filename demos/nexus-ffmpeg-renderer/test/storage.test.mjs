@@ -376,3 +376,37 @@ test("rejects inconsistent private object range metadata", async () => {
     }
   }
 });
+
+
+test("deletes only the scoped private staged object using a signed S3 request", async () => {
+  const keys = ["AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION"];
+  const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  const originalFetch = globalThis.fetch;
+  let captured;
+  try {
+    process.env.AWS_ENDPOINT_URL = "https://objects.example.test";
+    process.env.AWS_S3_BUCKET_NAME = "nexus-private";
+    process.env.AWS_ACCESS_KEY_ID = "test-access";
+    process.env.AWS_SECRET_ACCESS_KEY = "test-secret";
+    process.env.AWS_DEFAULT_REGION = "auto";
+    globalThis.fetch = async (url, init) => {
+      captured = { url: String(url), init };
+      return new Response(null, { status: 204 });
+    };
+    const { deletePrivateAsset } = await import("../src/storage.mjs");
+    const result = await deletePrivateAsset({
+      tenantId: "tenant-delete", projectId: "project-delete",
+      assetId: "asset-delete", extension: ".mp4",
+    });
+    assert.deepEqual(result, { deleted: true });
+    assert.equal(captured.init.method, "DELETE");
+    assert.match(captured.url, /assets\/tenant-delete\/project-delete\//);
+    assert.match(captured.init.headers.get("authorization"), /^AWS4-HMAC-SHA256/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
