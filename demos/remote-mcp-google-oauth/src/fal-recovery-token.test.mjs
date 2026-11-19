@@ -7,7 +7,7 @@ const scopeA = "a".repeat(64);
 const scopeB = "b".repeat(64);
 const endpointId = "blackforestlabs/flux-3-max/text-to-video";
 const requestId = "019a1b2c-3d4e-7f80-9a1b-2c3d4e5f6a7b";
-const now = 1_800_000_000;
+const now = Math.floor(Date.now() / 1000);
 
 test("creates and verifies a recovery token for the exact account and fal job", async () => {
   const token = await createFalRecoveryToken(apiKey, scopeA, endpointId, requestId, now + 3600);
