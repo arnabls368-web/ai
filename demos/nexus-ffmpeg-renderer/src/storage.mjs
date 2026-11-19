@@ -321,6 +321,13 @@ export async function cleanupStagedAssets({
       throw new Error("Private staged asset listing failed (HTTP " + status + ").");
     }
     const xml = await readResponseTextBounded(response, 2 * 1024 * 1024);
+    if (!/<ListBucketResult(?:\s[^>]*)?>[\s\S]*<\/ListBucketResult>/.test(xml)) {
+      throw new Error("Staged asset listing returned malformed XML.");
+    }
+    const truncated = xmlTag(xml, "IsTruncated");
+    if (truncated !== "true" && truncated !== "false") {
+      throw new Error("Staged asset listing omitted a valid truncation status.");
+    }
     pages += 1;
     for (const match of xml.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)) {
       const key = xmlTag(match[1], "Key");
@@ -342,7 +349,6 @@ export async function cleanupStagedAssets({
         return { scanned, deleted, pages, truncated: true };
       }
     }
-    const truncated = xmlTag(xml, "IsTruncated");
     continuationToken = truncated === "true" ? xmlTag(xml, "NextContinuationToken") : null;
     if (truncated === "true" && !continuationToken) {
       throw new Error("Staged asset listing omitted its continuation token.");
