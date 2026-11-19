@@ -102,7 +102,7 @@ export async function callPrivateRenderer({
   }
   const validRequestShape =
     (method === "GET" && scope === "render:read" && body === undefined && rawBody === undefined && range === undefined) ||
-    (method === "GET" && scope === "asset:read" && body === undefined && rawBody === undefined && typeof range === "string" && /^bytes=\\d+-\\d+$/.test(range)) ||
+    (method === "GET" && scope === "asset:read" && body === undefined && rawBody === undefined && typeof range === "string" && /^bytes=\d+-\d+$/.test(range)) ||
     (method === "POST" && scope === "render:submit" && body !== undefined && rawBody === undefined) ||
     (method === "PUT" && scope === "asset:write" && body === undefined && rawBody !== undefined);
   if (!validRequestShape) {
