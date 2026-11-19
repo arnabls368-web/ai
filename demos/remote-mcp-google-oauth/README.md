@@ -42,7 +42,7 @@ The following live-provider workflows have **not** yet been proven end to end:
 - A real render job that retrieves private objects, creates an MP4, and returns it through the signed output route.
 - Recovery of a real job/output across a Railway container restart.
 - A complete authenticated Google OAuth and YouTube upload test.
-- Implement and schedule a crash-safe staged-object cleanup sweep. Railway Buckets do not currently support lifecycle configuration, so automatic prefix expiry cannot be configured on the existing bucket. Explicit deletion is attempted on normal success/failure paths, but a process crash can leave temporary objects behind.
+- Enable and verify the renderer's staged-object cleanup sweep in Railway. The code now lists only `staged-assets/` objects and deletes video objects older than 24 hours; enable it with `NEXUS_STAGED_ASSET_CLEANUP_ENABLED=true`. It is not yet enabled in the live service. Railway Buckets do not currently support lifecycle configuration, so this scheduled sweep is the crash-recovery cleanup mechanism.
 
 A healthy `/health` endpoint proves process liveness only. It does not prove storage access, rendering, output retrieval, OAuth, or YouTube upload.
 
