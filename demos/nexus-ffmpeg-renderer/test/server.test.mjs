@@ -1212,3 +1212,21 @@ test("rejects unsafe staged cleanup scheduler intervals", async () => {
     }), /at least 15 minutes/);
   });
 });
+
+test("requires bucket configuration when staged cleanup is enabled", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const previousBucket = process.env.AWS_S3_BUCKET_NAME;
+    delete process.env.AWS_S3_BUCKET_NAME;
+    try {
+      assert.throws(() => createRenderJobServer({
+        token: "",
+        signingSecret: SIGNING_SECRET,
+        workRoot,
+        cleanupEnabled: true,
+      }), /requires AWS_S3_BUCKET_NAME/);
+    } finally {
+      if (previousBucket === undefined) delete process.env.AWS_S3_BUCKET_NAME;
+      else process.env.AWS_S3_BUCKET_NAME = previousBucket;
+    }
+  });
+});
