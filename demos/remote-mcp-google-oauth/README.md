@@ -123,7 +123,7 @@ Complete the Google OAuth flow when prompted. The connected account authorizes t
 
 ## Deployment
 
-The YouTube MCP deployment workflow is **manual-only** (`workflow_dispatch`); pull requests and branch pushes do not deploy the Worker. The workflow requires the repository secret `CLOUDFLARE_API_TOKEN`, restricted to the target Cloudflare account and Workers Scripts Write permission. Do not dispatch it or deploy production as part of passive testing.
+The YouTube MCP deployment workflow is **manual-only** (`workflow_dispatch`); pull requests and branch pushes do not deploy the Worker. A manual dispatch must also explicitly check the required `confirm_production_deploy` boolean input, which defaults to false, and must target `main`. The workflow requires the repository secret `CLOUDFLARE_API_TOKEN`, restricted to the target Cloudflare account and Workers Scripts Write permission. Do not dispatch it or deploy production as part of passive testing.
 
 The pull request remains a draft. Do not merge it, deploy it, run live storage writes, start paid generation, or upload a video without the required explicit approval.
 
