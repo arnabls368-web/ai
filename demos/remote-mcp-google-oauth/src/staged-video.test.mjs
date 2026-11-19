@@ -102,3 +102,22 @@ test("range reader rejects incorrect range metadata and oversized requests", asy
   await assert.rejects(readRange(0, 2), /invalid staged video range/);
   await assert.rejects(readRange(0, 9 * 1024 * 1024), /invalid/);
 });
+
+
+test("staged video cleanup uses the dedicated scoped DELETE route", async () => {
+  const { deleteStagedVideoAsset } = await import("./staged-video.mjs");
+  let request;
+  await deleteStagedVideoAsset({
+    assetId: "asset-1",
+    extension: "mp4",
+    callRenderer: async (value) => {
+      request = value;
+      return Response.json({ deleted: true });
+    },
+  });
+  assert.deepEqual(request, {
+    method: "DELETE",
+    scope: "asset:delete",
+    path: "/assets/asset-1/mp4",
+  });
+});
