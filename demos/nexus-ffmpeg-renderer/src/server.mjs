@@ -459,14 +459,11 @@ export function createRenderJobServer({
       if (isSubmission) {
         const contentType = String(request.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
           if (contentType !== "application/json") return json(response, 415, { error: "content-type must be application/json" });
-          if (queue.length + active + pendingSubmissions >= MAX_QUEUE_SIZE) {
-            response.shouldKeepAlive = false;
-            return json(response, 429, { error: "render queue is full" });
-          }
-          // Reserve capacity before the first await so concurrent requests cannot
-          // all pass the limit check while their request bodies or job records persist.
-          pendingSubmissions += 1;
+          // Read and validate the request before reserving a queue slot. This
+          // lets an idempotent retry retrieve its existing job even when the
+          // queue is full, without consuming additional capacity.
           let enqueued = false;
+          let slotReserved = false;
           try {
           const body = await readJson(request);
           if (!body || typeof body !== "object" || Array.isArray(body) ||
@@ -519,6 +516,14 @@ export function createRenderJobServer({
               deduplicated: true,
             });
           }
+          // No await separates the capacity check from its reservation, so
+          // distinct submissions cannot overbook the bounded queue.
+          if (queue.length + active + pendingSubmissions >= MAX_QUEUE_SIZE) {
+            response.shouldKeepAlive = false;
+            return json(response, 429, { error: "render queue is full" });
+          }
+          pendingSubmissions += 1;
+          slotReserved = true;
           const id = randomUUID();
           const job = {
             id,
@@ -549,13 +554,14 @@ export function createRenderJobServer({
           queue.push(job);
           enqueued = true;
           pendingSubmissions -= 1;
+          slotReserved = false;
           await pruneJobs();
           pump();
           return json(response, 202, { id, status: job.status, statusUrl: `/jobs/${id}` });
           } catch (error) {
             return json(response, error.status ?? 400, { error: error.message });
           } finally {
-            if (!enqueued) pendingSubmissions -= 1;
+            if (slotReserved && !enqueued) pendingSubmissions -= 1;
           }
       }
 
