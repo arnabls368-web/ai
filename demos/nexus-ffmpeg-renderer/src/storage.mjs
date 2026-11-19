@@ -52,8 +52,13 @@ function signedRequest({ method, key, body, contentType, payloadHash: suppliedPa
   } else {
     throw new Error("AWS_S3_URL_STYLE must be path or virtual-host.");
   }
-  const queryEntries = Object.entries(query ?? {}).sort(([a], [b]) => a.localeCompare(b));
-  const canonicalQuery = queryEntries.map(([name, value]) => encodeURIComponent(name) + "=" + encodeURIComponent(value)).join("&");
+  const awsEncode = (value) => encodeURIComponent(String(value)).replace(/[!'()*]/g, (char) =>
+    "%" + char.charCodeAt(0).toString(16).toUpperCase()
+  );
+  const queryEntries = Object.entries(query ?? {})
+    .map(([name, value]) => [awsEncode(name), awsEncode(value)])
+    .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+  const canonicalQuery = queryEntries.map(([name, value]) => name + "=" + value).join("&");
   url.search = canonicalQuery;
   const host = url.host;
   const payloadHash = suppliedPayloadHash ?? (body ? createHash("sha256").update(body).digest("hex") : EMPTY_SHA256);
