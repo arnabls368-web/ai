@@ -1,4 +1,7 @@
 export function trustedFalUrl(value) {
+  if (typeof value !== "string" || value.length === 0 || value.length > 2_048) {
+    throw new Error("fal.ai returned an unexpected queue URL; refusing to fetch it.");
+  }
   let url;
   try {
     url = new URL(value);
