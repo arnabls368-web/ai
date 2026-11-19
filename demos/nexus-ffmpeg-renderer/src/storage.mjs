@@ -38,20 +38,23 @@ function hmac(key, value, encoding) {
   return createHmac("sha256", key).update(value, "utf8").digest(encoding);
 }
 
-function signedRequest({ method, key, body, contentType, payloadHash: suppliedPayloadHash, contentLength, range }) {
+function signedRequest({ method, key, body, contentType, payloadHash: suppliedPayloadHash, contentLength, range, query }) {
   const { bucket, base, region, accessKeyId, secretAccessKey } = config();
   const urlStyle = process.env.AWS_S3_URL_STYLE ?? "path";
   let url;
   if (urlStyle === "virtual-host") {
     url = new URL(base.toString());
     url.hostname = bucket + "." + base.hostname;
-    url.pathname = base.pathname.replace(/\/$/, "") + "/" + encodePath(key);
+    url.pathname = base.pathname.replace(/\/$/, "") + (key === null ? "" : "/" + encodePath(key));
   } else if (urlStyle === "path") {
-    const objectPath = base.pathname.replace(/\/$/, "") + "/" + encodePath(bucket) + "/" + encodePath(key);
+    const objectPath = base.pathname.replace(/\/$/, "") + "/" + encodePath(bucket) + (key === null ? "" : "/" + encodePath(key));
     url = new URL(base.origin + objectPath);
   } else {
     throw new Error("AWS_S3_URL_STYLE must be path or virtual-host.");
   }
+  const queryEntries = Object.entries(query ?? {}).sort(([a], [b]) => a.localeCompare(b));
+  const canonicalQuery = queryEntries.map(([name, value]) => encodeURIComponent(name) + "=" + encodeURIComponent(value)).join("&");
+  url.search = canonicalQuery;
   const host = url.host;
   const payloadHash = suppliedPayloadHash ?? (body ? createHash("sha256").update(body).digest("hex") : EMPTY_SHA256);
   const amzDate = new Date().toISOString().replace(/[:-]|\.\d{3}/g, "");
@@ -68,7 +71,7 @@ function signedRequest({ method, key, body, contentType, payloadHash: suppliedPa
   const canonicalHeaders = Object.keys(headers).sort().map((name) =>
     name + ":" + String(headers[name]).trim() + "\n"
   ).join("");
-  const canonicalRequest = method + "\n" + url.pathname + "\n\n" +
+  const canonicalRequest = method + "\n" + url.pathname + "\n" + canonicalQuery + "\n" +
     canonicalHeaders + signedHeaders + "\n" + payloadHash;
   const scope = dateStamp + "/" + region + "/s3/aws4_request";
   const stringToSign = [
@@ -227,6 +230,85 @@ export async function getPrivateAssetRange({ tenantId, projectId, assetId, exten
     throw new Error("Private object storage returned inconsistent range metadata.");
   }
   return { body: response.body, contentRange, contentLength, totalBytes };
+}
+
+
+
+function decodeXml(value) {
+  return value.replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
+}
+
+function xmlTag(block, name) {
+  const match = block.match(new RegExp("<" + name + ">([\\\\s\\\\S]*?)</" + name + ">"));
+  return match ? decodeXml(match[1]) : null;
+}
+
+/**
+ * Remove only old video objects in the isolated staged-assets namespace.
+ * LastModified is supplied by ListObjectsV2; the 24-hour grace period
+ * protects uploads and approvals in progress.
+ */
+export async function cleanupStagedAssets({
+  olderThanMs = 24 * 60 * 60 * 1000,
+  maxDeletes = 1000,
+  maxPages = 100,
+  now = Date.now(),
+} = {}) {
+  if (!Number.isSafeInteger(olderThanMs) || olderThanMs < 60 * 60 * 1000 ||
+      !Number.isSafeInteger(maxDeletes) || maxDeletes < 1 || maxDeletes > 5000 ||
+      !Number.isSafeInteger(maxPages) || maxPages < 1 || maxPages > 100 ||
+      !Number.isSafeInteger(now)) {
+    throw new Error("Staged asset cleanup limits are invalid.");
+  }
+  const cutoff = now - olderThanMs;
+  let continuationToken;
+  let scanned = 0;
+  let deleted = 0;
+  let pages = 0;
+  do {
+    const query = {
+      "list-type": "2",
+      "max-keys": "1000",
+      prefix: "staged-assets/",
+      ...(continuationToken ? { "continuation-token": continuationToken } : {}),
+    };
+    const response = await signedRequest({ method: "GET", key: null, query });
+    if (!response.ok) {
+      const status = response.status;
+      await response.body?.cancel();
+      throw new Error("Private staged asset listing failed (HTTP " + status + ").");
+    }
+    const xml = await response.text();
+    if (xml.length > 2 * 1024 * 1024) throw new Error("Staged asset listing response exceeded 2 MiB.");
+    pages += 1;
+    for (const match of xml.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)) {
+      const key = xmlTag(match[1], "Key");
+      const modified = xmlTag(match[1], "LastModified");
+      const timestamp = modified ? Date.parse(modified) : NaN;
+      scanned += 1;
+      if (!key || !key.startsWith("staged-assets/") ||
+          !/\.(?:mp4|mov|m4v|webm|mkv)$/i.test(key) ||
+          !Number.isFinite(timestamp) || timestamp > cutoff) continue;
+      const removal = await signedRequest({ method: "DELETE", key });
+      if (!removal.ok && removal.status !== 404) {
+        const status = removal.status;
+        await removal.body?.cancel();
+        throw new Error("Private staged asset cleanup failed (HTTP " + status + ").");
+      }
+      await removal.body?.cancel();
+      deleted += 1;
+      if (deleted >= maxDeletes) {
+        return { scanned, deleted, pages, truncated: true };
+      }
+    }
+    const truncated = xmlTag(xml, "IsTruncated");
+    continuationToken = truncated === "true" ? xmlTag(xml, "NextContinuationToken") : null;
+    if (truncated === "true" && !continuationToken) {
+      throw new Error("Staged asset listing omitted its continuation token.");
+    }
+  } while (continuationToken && pages < maxPages);
+  return { scanned, deleted, pages, truncated: Boolean(continuationToken) };
 }
 
 export const MAX_ASSET_BYTES_LIMIT = MAX_ASSET_BYTES;
