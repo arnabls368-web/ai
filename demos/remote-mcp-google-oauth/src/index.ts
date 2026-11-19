@@ -14,6 +14,7 @@ import { stageVideoSource, createStagedVideoRangeReader, deleteStagedVideoAsset 
 import { requestHumanApproval } from "./human-approval.mjs";
 import { serializeApprovalBinding } from "./approval-binding.mjs";
 import { validateExternalVideoUrl } from "./external-video-url.mjs";
+import { validateYouTubeUploadUrl } from "./youtube-upload-url.mjs";
 export { OAuthStateDO } from "./oauth-state-do";
 
 export type Props = {
@@ -84,19 +85,7 @@ async function uploadToYouTube(
       if (!uploadUrl) throw new Error("YouTube did not return an upload URL");
 
       // Validate Google's session URL before forwarding the OAuth bearer token.
-      let parsedUploadUrl: URL;
-      try {
-        parsedUploadUrl = new URL(uploadUrl);
-      } catch {
-        throw new Error("YouTube returned an invalid resumable upload URL.");
-      }
-      if (parsedUploadUrl.protocol !== "https:" ||
-          parsedUploadUrl.hostname !== "www.googleapis.com" ||
-          parsedUploadUrl.port || parsedUploadUrl.username ||
-          parsedUploadUrl.password || parsedUploadUrl.hash) {
-        throw new Error("YouTube returned an unexpected upload URL; refusing to send authorization credentials.");
-      }
-      uploadUrl = parsedUploadUrl.toString();
+      uploadUrl = validateYouTubeUploadUrl(uploadUrl);
     }
 
     const uploaded = await uploadResumableVideoFromRanges({
