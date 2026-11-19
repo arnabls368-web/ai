@@ -23,7 +23,8 @@ export function validateFalJobRecord(job, expectedRequestId) {
       job.endpointId.length > 200 ||
       !/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*){1,4}$/i.test(job.endpointId) ||
       typeof job.statusUrl !== "string" ||
-      typeof job.responseUrl !== "string") {
+      typeof job.responseUrl !== "string" ||
+      (job.cancelUrl !== undefined && typeof job.cancelUrl !== "string")) {
     throw new Error("The saved fal.ai job record is invalid; refusing to contact the provider.");
   }
   return {
@@ -31,6 +32,7 @@ export function validateFalJobRecord(job, expectedRequestId) {
     requestId: job.requestId,
     statusUrl: trustedFalUrl(job.statusUrl),
     responseUrl: trustedFalUrl(job.responseUrl),
+    ...(job.cancelUrl === undefined ? {} : { cancelUrl: trustedFalUrl(job.cancelUrl) }),
     createdAt: typeof job.createdAt === "string" ? job.createdAt : "",
   };
 }
