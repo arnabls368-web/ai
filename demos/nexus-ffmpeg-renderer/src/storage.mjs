@@ -192,7 +192,7 @@ export async function getPrivateAsset({ tenantId, projectId, assetId, extension 
  * The caller owns and must consume or cancel the returned response body.
  */
 export async function getPrivateAssetRange({ tenantId, projectId, assetId, extension, start, end }) {
-  if (!/^\\.(?:mp4|mov|m4v|webm|mkv)$/i.test(extension)) {
+  if (!/^\.(?:mp4|mov|m4v|webm|mkv)$/i.test(extension)) {
     throw new Error("Unsupported staged video extension.");
   }
   if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) ||
@@ -217,7 +217,7 @@ export async function getPrivateAssetRange({ tenantId, projectId, assetId, exten
     throw new Error("Private object storage did not return a valid partial response.");
   }
   const contentRange = response.headers.get("content-range") ?? "";
-  const match = contentRange.match(/^bytes (\\d+)-(\\d+)\\/(\\d+)$/);
+  const match = contentRange.match(/^bytes (\d+)-(\d+)\/(\d+)$/);
   const contentLength = Number(response.headers.get("content-length"));
   const totalBytes = match ? Number(match[3]) : NaN;
   if (!match || Number(match[1]) !== start || Number(match[2]) !== end ||
