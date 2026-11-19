@@ -13,6 +13,15 @@ export function nextUploadOffset(rangeHeader, totalBytes) {
   return lastByte + 1;
 }
 
+/** Parse a 308 acknowledgement and always release its response stream. */
+async function acknowledgedUploadOffset(response, totalBytes) {
+  try {
+    return nextUploadOffset(response.headers.get("Range"), totalBytes);
+  } finally {
+    try { await response.body?.cancel(); } catch { /* Preserve protocol validation errors. */ }
+  }
+}
+
 /**
  * Upload a complete buffer through a resumable session. If a PUT is interrupted
  * or receives a 5xx response, query the session before sending any more bytes.
@@ -51,8 +60,7 @@ export async function uploadResumableVideo({
           body: new ArrayBuffer(0),
         });
         if (status.status === 308) {
-          offset = nextUploadOffset(status.headers.get("Range"), totalBytes);
-          await status.body?.cancel();
+          offset = await acknowledgedUploadOffset(status, totalBytes);
           if (offset >= totalBytes) {
             throw new Error("YouTube reported an incomplete upload after acknowledging every byte.");
           }
@@ -88,8 +96,7 @@ export async function uploadResumableVideo({
       });
 
       if (uploaded.status === 308) {
-        offset = nextUploadOffset(uploaded.headers.get("Range"), totalBytes);
-        await uploaded.body?.cancel();
+        offset = await acknowledgedUploadOffset(uploaded, totalBytes);
         if (offset >= totalBytes) {
           throw new Error("YouTube reported an incomplete upload after acknowledging every byte.");
         }
@@ -206,8 +213,7 @@ export async function uploadResumableVideoFromRanges({
         : "YouTube upload status check failed.");
     }
     if (status.status === 308) {
-      offset = nextUploadOffset(status.headers.get("Range"), totalBytes);
-      await status.body?.cancel();
+      offset = await acknowledgedUploadOffset(status, totalBytes);
       if (offset >= totalBytes) {
         throw new Error("YouTube reported an incomplete upload after acknowledging every byte.");
       }
@@ -238,7 +244,7 @@ export async function uploadResumableVideoFromRanges({
             body: new ArrayBuffer(0),
           });
           if (status.status === 308) {
-            const acknowledged = nextUploadOffset(status.headers.get("Range"), totalBytes);
+            const acknowledged = await acknowledgedUploadOffset(status, totalBytes);
             if (acknowledged < offset) {
               await status.body?.cancel();
               throw new Error("YouTube resumable-upload progress moved backwards.");
@@ -247,7 +253,6 @@ export async function uploadResumableVideoFromRanges({
               await status.body?.cancel();
               throw new Error("YouTube acknowledged bytes beyond the submitted chunk.");
             }
-            await status.body?.cancel();
             if (acknowledged >= totalBytes) {
               throw new Error("YouTube reported an incomplete upload after acknowledging every byte.");
             }
@@ -293,7 +298,7 @@ export async function uploadResumableVideoFromRanges({
         continue;
       }
       if (uploaded.status === 308) {
-        const acknowledged = nextUploadOffset(uploaded.headers.get("Range"), totalBytes);
+        const acknowledged = await acknowledgedUploadOffset(uploaded, totalBytes);
         if (acknowledged < offset) {
           await uploaded.body?.cancel();
           throw new Error("YouTube resumable-upload progress moved backwards.");
@@ -302,7 +307,6 @@ export async function uploadResumableVideoFromRanges({
           await uploaded.body?.cancel();
           throw new Error("YouTube acknowledged bytes beyond the submitted chunk.");
         }
-        await uploaded.body?.cancel();
         if (acknowledged > offset) {
           offset = acknowledged;
           advanced = true;
