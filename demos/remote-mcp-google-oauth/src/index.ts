@@ -180,21 +180,46 @@ function createServer() {
         if (!source.ok) { const status = source.status; await source.body?.cancel(); throw new Error("Could not retrieve video (HTTP " + status + ")."); }
         const mimeType = (source.headers.get("Content-Type") || "").split(";")[0].trim().toLowerCase();
         if (mimeType !== "video/mp4" && !(videoUrl && mimeType.startsWith("video/"))) { await source.body?.cancel(); throw new Error("The video source must return a supported video file."); }
-        const videoBytes = await readVideoBodyBounded(source);
-        // Bind approval to the exact bytes and metadata after retrieval, but
-        // before opening a YouTube upload session or transmitting the video.
-        const digest = await crypto.subtle.digest("SHA-256", videoBytes);
-        const videoSha256 = Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
         const sourceLabel = projectId && renderJobId
           ? "NEXUS render project " + projectId + ", job " + renderJobId
           : "External HTTPS source host " + new URL(videoUrl!).hostname;
+        // Stream into private, account-scoped staging instead of buffering the video in this Worker.
+        const stagingBindings = env as unknown as Record<string, unknown>;
+        if (typeof stagingBindings.NEXUS_RENDERER_URL !== "string" || typeof stagingBindings.NEXUS_RENDER_SIGNING_SECRET !== "string") {
+          await source.body?.cancel();
+          throw new Error("Private NEXUS staging storage is not configured on this Worker.");
+        }
+        const rendererProjectId = projectId ?? "youtube-uploads";
+        const callStagingRenderer = (request: {
+          method: "GET" | "PUT";
+          scope: "asset:read" | "asset:write";
+          path: string;
+          rawBody?: ReadableStream<Uint8Array>;
+          contentType?: string;
+          range?: string;
+        }) => callPrivateRenderer({
+          baseUrl: stagingBindings.NEXUS_RENDERER_URL as string,
+          secret: stagingBindings.NEXUS_RENDER_SIGNING_SECRET as string,
+          tenantId: owner,
+          projectId: rendererProjectId,
+          ...request,
+        });
+        const staged = await stageVideoSource({ source, mimeType, callRenderer: callStagingRenderer });
+        const readRange = createStagedVideoRangeReader({
+          assetId: staged.assetId,
+          extension: staged.extension,
+          totalBytes: staged.totalBytes,
+          callRenderer: callStagingRenderer,
+        });
+        // Approval binds the exact staged digest and metadata before YouTube upload begins.
+        const videoSha256 = staged.sha256;
         const approvalDigest = await crypto.subtle.digest(
           "SHA-256",
           new TextEncoder().encode(serializeApprovalBinding([
             auth.email.trim().toLowerCase(),
             sourceLabel,
             mimeType,
-            String(videoBytes.byteLength),
+            String(staged.totalBytes),
             videoSha256,
             title,
             description || "",
@@ -209,7 +234,7 @@ function createServer() {
             "YOUTUBE PRIVATE UPLOAD APPROVAL",
             "Google channel account: " + auth.email,
             "Source: " + sourceLabel,
-            "Video size: " + videoBytes.byteLength + " bytes",
+            "Video size: " + staged.totalBytes + " bytes",
             "Media type: " + mimeType,
             "Video SHA-256: " + videoSha256,
             "Title: " + title,
@@ -223,7 +248,7 @@ function createServer() {
           if ("inputRequired" in approval) return approval.inputRequired;
           return { isError: true, content: [{ type: "text", text: "YouTube upload was not approved. No upload session was started." }] };
         }
-        const uploaded = await uploadToYouTube(videoBytes, mimeType, title, description || "", privacyStatus, auth.accessToken, auth.refreshToken);
+        const uploaded = await uploadToYouTube(staged.totalBytes, readRange, mimeType, title, description || "", privacyStatus, auth.accessToken, auth.refreshToken);
         return { content: [{ type: "text", text: "Video uploaded successfully. Video ID: " + uploaded.videoId + ". URL: https://www.youtube.com/watch?v=" + uploaded.videoId + ". Visibility: " + uploaded.privacyStatus + "." }] };
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown upload error";
