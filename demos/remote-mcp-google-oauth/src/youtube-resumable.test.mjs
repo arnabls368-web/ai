@@ -269,8 +269,8 @@ test("status-checks an existing upload session before resuming with a refreshed 
     fetchImpl: async (_url, init) => {
       calls.push(init);
       if (calls.length === 1) {
-        assert.equal(init.headers.get("Authorization"), "Bearer refreshed-token");
-        assert.equal(init.headers.get("Content-Range"), `bytes */${totalBytes}`);
+        assert.equal(new Headers(init.headers).get("Authorization"), "Bearer refreshed-token");
+        assert.equal(new Headers(init.headers).get("Content-Range"), `bytes */${totalBytes}`);
         return new Response(null, { status: 308, headers: { Range: "bytes=0-524287" } });
       }
       return new Response(JSON.stringify({ id: "video-id" }), { status: 201 });
