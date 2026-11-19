@@ -42,7 +42,7 @@ The following live-provider workflows have **not** yet been proven end to end:
 - A real render job that retrieves private objects, creates an MP4, and returns it through the signed output route.
 - Recovery of a real job/output across a Railway container restart.
 - A complete authenticated Google OAuth and YouTube upload test.
-- Lifecycle/retention verification for staged video objects in the configured S3-compatible provider.
+- Configure and verify an S3-compatible bucket lifecycle expiry for staged video objects. Explicit deletion is attempted after approval decline, upload completion or failure; lifecycle expiry is the crash/retry safety net.
 
 A healthy `/health` endpoint proves process liveness only. It does not prove storage access, rendering, output retrieval, OAuth, or YouTube upload.
 
@@ -134,5 +134,6 @@ vidIQ provides a separate hosted remote MCP endpoint at `https://mcp.vidiq.com/m
 - The source is streamed into private account-scoped staging; its size and SHA-256 are verified from the renderer storage path.
 - Before starting a YouTube upload session, the tool requests interactive approval bound to the connected Google account, video SHA-256, title, description and privacy setting.
 - After approval, the uploader fetches bounded byte ranges from private staging and sends them through a resumable YouTube session; interrupted transfers query the acknowledged upload offset before retrying.
+- Staged objects are explicitly deleted after the tool operation where possible. Configure a bucket lifecycle expiry as a fallback for worker termination or network failure.
 - A decline, cancellation, missing approval context, or unsupported approval flow does not start an upload.
 - No video is uploaded during planning, research, asset generation, rendering or readiness checks.
