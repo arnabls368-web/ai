@@ -486,6 +486,37 @@ test("staged asset cleanup rejects unsafe limits and fails closed on listing err
 });
 
 
+
+test("bounds staged listing XML while streaming the response body", async () => {
+  const keys = ["AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION"];
+  const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  const originalFetch = globalThis.fetch;
+  let cancelled = false;
+  try {
+    process.env.AWS_ENDPOINT_URL = "https://objects.example.test";
+    process.env.AWS_S3_BUCKET_NAME = "nexus-private";
+    process.env.AWS_ACCESS_KEY_ID = "test-access";
+    process.env.AWS_SECRET_ACCESS_KEY = "test-secret";
+    process.env.AWS_DEFAULT_REGION = "auto";
+    globalThis.fetch = async () => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new Uint8Array(2 * 1024 * 1024));
+        controller.enqueue(new Uint8Array(1));
+      },
+      cancel() { cancelled = true; },
+    }));
+    const { cleanupStagedAssets } = await import("../src/storage.mjs");
+    await assert.rejects(cleanupStagedAssets(), /listing response exceeded 2 MiB/);
+    assert.equal(cancelled, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
 test("paginates staged object listings with safely encoded continuation tokens", async () => {
   const keys = ["AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION"];
   const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
