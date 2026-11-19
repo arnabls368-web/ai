@@ -436,6 +436,7 @@ test("sweeps only expired video objects under the staged-assets prefix", async (
           '<Contents><Key>assets/tenant-a/project-a/permanent.mp4</Key><LastModified>2026-11-17T00:00:00.000Z</LastModified></Contents>' +
           '<Contents><Key>staged-assets/tenant-a/project-a/image.png</Key><LastModified>2026-11-17T00:00:00.000Z</LastModified></Contents>' +
           '<Contents><Key>staged-assets/../../assets/tenant/project/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.mp4</Key><LastModified>2026-11-17T00:00:00.000Z</LastModified></Contents>' +
+          '<Contents><Key>STAGED-ASSETS/tenant-a/project-a/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.mp4</Key><LastModified>2026-11-17T00:00:00.000Z</LastModified></Contents>' +
           '</ListBucketResult>';
         return new Response(xml);
       }
@@ -447,7 +448,7 @@ test("sweeps only expired video objects under the staged-assets prefix", async (
     };
     const { cleanupStagedAssets } = await import("../src/storage.mjs");
     const result = await cleanupStagedAssets({ olderThanMs: 3 * 60 * 60 * 1000, now });
-    assert.deepEqual(result, { scanned: 5, deleted: 1, pages: 1, truncated: false });
+    assert.deepEqual(result, { scanned: 6, deleted: 1, pages: 1, truncated: false });
     assert.equal(new URL(listingUrl).searchParams.get("prefix"), "staged-assets/");
     assert.equal(new URL(listingUrl).searchParams.get("list-type"), "2");
     assert.equal(deleted.length, 1);
