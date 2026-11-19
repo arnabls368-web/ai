@@ -417,11 +417,8 @@ export interface ApprovalDialogOptions {
 		logo?: string;
 		description?: string;
 	};
-	/**
-	 * Arbitrary state data to pass through the approval flow
-	 * Will be encoded in the form and returned when approval is complete
-	 */
-	state: Record<string, any>;
+	/** HMAC-authenticated, base64-encoded state for the approval form. */
+	encodedState: string;
 	/**
 	 * CSRF token to include in the form
 	 */
@@ -442,9 +439,7 @@ export interface ApprovalDialogOptions {
  * @returns A Response containing the HTML approval dialog
  */
 export function renderApprovalDialog(request: Request, options: ApprovalDialogOptions): Response {
-	const { client, server, state, csrfToken, setCookie } = options;
-
-	const encodedState = btoa(JSON.stringify(state));
+	const { client, server, encodedState, csrfToken, setCookie } = options;
 
 	const serverName = sanitizeText(server.name);
 	const clientName = client?.clientName ? sanitizeText(client.clientName) : "Unknown MCP Client";
@@ -814,6 +809,51 @@ async function getApprovedClientsFromCookie(
 		}
 		return approvedClients as string[];
 	} catch (_e) {
+		return null;
+	}
+}
+
+/**
+ * Signs approval-form state so the browser cannot alter the OAuth request
+ * between the authorization screen and the approval POST.
+ */
+export async function signAuthorizationState(
+	state: Record<string, unknown>,
+	secret: string,
+): Promise<string> {
+	const payload = JSON.stringify(state);
+	const bytes = new TextEncoder().encode(payload);
+	if (bytes.byteLength > 32_768) {
+		throw new Error("OAuth approval state is too large.");
+	}
+	let binary = "";
+	for (const byte of bytes) binary += String.fromCharCode(byte);
+	const signature = await signData(payload, secret);
+	return signature + "." + btoa(binary);
+}
+
+/** Verify and decode the exact approval state rendered by the server. */
+export async function verifyAuthorizationState(
+	encodedState: string,
+	secret: string,
+): Promise<Record<string, unknown> | null> {
+	if (typeof encodedState !== "string" || encodedState.length > 44_000) return null;
+	const parts = encodedState.split(".");
+	if (parts.length !== 2 || !/^[0-9a-f]{64}$/.test(parts[0])) return null;
+	let payload: string;
+	try {
+		const binary = atob(parts[1]);
+		const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+		payload = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+	} catch {
+		return null;
+	}
+	if (!(await verifySignature(parts[0], payload, secret))) return null;
+	try {
+		const value: unknown = JSON.parse(payload);
+		if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+		return value as Record<string, unknown>;
+	} catch {
 		return null;
 	}
 }
