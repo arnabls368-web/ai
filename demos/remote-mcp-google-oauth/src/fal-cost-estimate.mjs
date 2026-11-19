@@ -1,5 +1,3 @@
-export type FalEstimateType = "historical_api_price" | "unit_price";
-
 export function buildFalCostEstimateRequest(
   endpointId: string,
   estimateType: FalEstimateType,
