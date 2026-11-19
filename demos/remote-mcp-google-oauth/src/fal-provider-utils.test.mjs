@@ -69,6 +69,7 @@ test("rejects missing, mismatched, malformed, or untrusted persisted job records
     { ...valid, requestId: "another-request" },
     { ...valid, endpointId: "https://attacker.example/steal" },
     { ...valid, endpointId: "../attacker" },
+    { ...valid, endpointId: "fal-ai/" + "a".repeat(194) },
     { ...valid, statusUrl: "https://attacker.example/status" },
     { ...valid, responseUrl: "http://queue.fal.run/result" },
     { ...valid, responseUrl: "https://queue.fal.run/result?token=unexpected" },
