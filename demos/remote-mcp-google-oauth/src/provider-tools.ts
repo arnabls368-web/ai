@@ -79,11 +79,12 @@ export function registerProviderTools(server: McpServer) {
         query: z.string().min(1).max(120).optional(),
         category: z.string().min(2).max(80).optional(),
         endpointId: z.string().min(3).max(200).optional(),
+        cursor: z.string().min(1).max(512).optional(),
         limit: z.number().int().min(1).max(10).default(5),
         includeSchema: z.boolean().default(false),
       }),
     },
-    async ({ query, category, endpointId, limit, includeSchema }) => {
+    async ({ query, category, endpointId, cursor, limit, includeSchema }) => {
       try {
         const apiKey = secret("FAL_KEY");
         if (!apiKey) throw new Error("fal.ai is not configured on this Worker. Add FAL_KEY as a Cloudflare Worker secret.");
@@ -93,6 +94,7 @@ export function registerProviderTools(server: McpServer) {
         if (query) url.searchParams.set("q", query);
         if (category) url.searchParams.set("category", category);
         if (endpointId) url.searchParams.set("endpoint_id", endpointId);
+        if (cursor) url.searchParams.set("cursor", cursor);
         if (includeSchema) url.searchParams.append("expand", "openapi-3.0");
         const data = await providerJson(url.toString(), {
           headers: { Authorization: `Key ${apiKey}`, Accept: "application/json" },
