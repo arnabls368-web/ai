@@ -13,6 +13,7 @@ import { uploadResumableVideo } from "./youtube-resumable.mjs";
 import { requestHumanApproval } from "./human-approval.mjs";
 import { serializeApprovalBinding } from "./approval-binding.mjs";
 import { validateExternalVideoUrl } from "./external-video-url.mjs";
+import { readVideoBodyBounded } from "./read-video-body.mjs";
 export { OAuthStateDO } from "./oauth-state-do";
 
 export type Props = {
@@ -21,62 +22,6 @@ export type Props = {
   accessToken: string;
   refreshToken?: string;
 };
-
-const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
-
-const humanApprovalSchema = z.object({ confirm: z.boolean() });
-const humanApprovalApi = {
-  acceptedContent,
-  inputRequired,
-  inputResponse,
-  approvalSchema: humanApprovalSchema,
-  approvalWireSchema: {
-    type: "object",
-    properties: { confirm: { type: "boolean", title: "I approve this exact operation" } },
-    required: ["confirm"],
-  },
-};
-
-/** Read an untrusted video response without ever buffering more than the upload limit. */
-async function readVideoBodyBounded(response: Response): Promise<ArrayBuffer> {
-  const declaredLength = response.headers.get("Content-Length");
-  if (declaredLength !== null) {
-    const parsedLength = Number(declaredLength);
-    if (!Number.isSafeInteger(parsedLength) || parsedLength < 0) {
-      throw new Error("Video response has an invalid Content-Length header.");
-    }
-    if (parsedLength > MAX_VIDEO_BYTES) {
-      throw new Error("Video exceeds the 50 MB limit for this first version.");
-    }
-  }
-  if (!response.body) throw new Error("Video response has no readable body.");
-
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > MAX_VIDEO_BYTES) {
-        await reader.cancel("Video exceeds upload size limit.");
-        throw new Error("Video exceeds the 50 MB limit for this first version.");
-      }
-      chunks.push(value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return bytes.buffer;
-}
 
 async function uploadToYouTube(
   videoBytes: ArrayBuffer,
