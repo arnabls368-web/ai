@@ -129,29 +129,23 @@ async function readStagedRangeBytes(range, expectedBytes) {
     throw new Error("Staged video range returned an unsupported body.");
   }
   const reader = range.body.getReader();
-  const chunks = [];
+  const bytes = new Uint8Array(expectedBytes);
   let received = 0;
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      received += value.byteLength;
-      if (received > expectedBytes) {
+      if (received + value.byteLength > expectedBytes) {
         await reader.cancel("Staged range exceeded its declared length.");
         throw new Error("Staged video range body exceeded its declared length.");
       }
-      chunks.push(value);
+      bytes.set(value, received);
+      received += value.byteLength;
     }
   } finally {
     reader.releaseLock();
   }
   if (received !== expectedBytes) throw new Error("Staged video range body was shorter than its declared length.");
-  const bytes = new Uint8Array(expectedBytes);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
   return bytes;
 }
 
