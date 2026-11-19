@@ -184,6 +184,37 @@ test("Durable Object stores once and consumes a valid state exactly once", async
   assert.deepEqual(await replay.json(), { value: null });
 });
 
+test("Durable Object rolls back a state record when expiry alarm scheduling fails", async () => {
+  const values = new Map();
+  let failAlarm = true;
+  const storage = {
+    async transaction(callback) {
+      return callback({
+        get: async (key) => values.get(key),
+        put: async (key, value) => values.set(key, value),
+        delete: async (key) => values.delete(key),
+      });
+    },
+    async setAlarm() {
+      if (failAlarm) throw new Error("simulated alarm storage failure");
+    },
+  };
+  const durableObject = new OAuthStateDO({ storage });
+  const request = () => new Request("https://do.example/store", {
+    method: "POST",
+    body: JSON.stringify({ value: "retryable-state", expiresAt: Date.now() + 60_000 }),
+  });
+
+  const failed = await durableObject.fetch(request());
+  assert.equal(failed.status, 503);
+  assert.equal(values.has("oauth-state"), false);
+
+  failAlarm = false;
+  const retried = await durableObject.fetch(request());
+  assert.equal(retried.status, 201);
+  assert.equal(values.get("oauth-state").value, "retryable-state");
+});
+
 test("Durable Object consumes and deletes an expired state without returning its value", async () => {
   const values = new Map([["oauth-state", { value: "expired-state", expiresAt: Date.now() - 1 }]]);
   const storage = {
