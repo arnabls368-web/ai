@@ -5,7 +5,7 @@ import { chmod, mkdir, mkdtemp, open, readdir, readFile, rename, rm, lstat, writ
 import path from "node:path";
 import { constants as fsConstants } from "node:fs";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
-import { extensionForMime, getPrivateAsset, getPrivateAssetRange, putPrivateAssetFile, MAX_ASSET_BYTES_LIMIT } from "./storage.mjs";
+import { extensionForMime, getPrivateAsset, getPrivateAssetRange, putPrivateAssetFile, deletePrivateAsset, MAX_ASSET_BYTES_LIMIT } from "./storage.mjs";
 import { renderManifest, validateManifest } from "./renderer.mjs";
 import { verifyRenderToken } from "./auth.mjs";
 
@@ -54,7 +54,7 @@ async function readJson(request) {
 async function writeBinaryLimited(request, filePath, limit = MAX_ASSET_BYTES_LIMIT) {
   const declaredLength = request.headers["content-length"];
   if (declaredLength !== undefined && Number(declaredLength) > limit) {
-    throw Object.assign(new Error("Asset exceeds the 100 MiB limit."), { status: 413 });
+    throw Object.assign(new Error("Asset exceeds the configured " + Math.floor(limit / (1024 * 1024)) + " MiB limit."), { status: 413 });
   }
   const handle = await open(filePath, "wx", 0o600);
   let size = 0;
@@ -308,12 +308,14 @@ export function createRenderJobServer({
       const isSubmission = request.method === "POST" && url.pathname === "/jobs";
       const assetMatch = request.method === "PUT" ? url.pathname.match(/^\/assets\/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})$/) : null;
       const assetReadMatch = request.method === "GET" ? url.pathname.match(/^\/assets\/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})\/(mp4|mov|m4v|webm|mkv)$/) : null;
+      const assetDeleteMatch = request.method === "DELETE" ? url.pathname.match(/^\/assets\/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})\/(mp4|mov|m4v|webm|mkv)$/) : null;
       const isAssetUpload = Boolean(assetMatch);
       const isAssetRead = Boolean(assetReadMatch);
+      const isAssetDelete = Boolean(assetDeleteMatch);
       const claims = requestClaims(request, {
         signingSecret,
         legacyToken: allowLegacyToken ? token : undefined,
-        scope: isSubmission ? "render:submit" : isAssetUpload ? "asset:write" : isAssetRead ? "asset:read" : "render:read",
+        scope: isSubmission ? "render:submit" : isAssetUpload ? "asset:write" : isAssetRead ? "asset:read" : isAssetDelete ? "asset:delete" : "render:read",
       });
       if (!claims) return json(response, 401, { error: "unauthorized" });
 
@@ -322,6 +324,16 @@ export function createRenderJobServer({
         return json(response, 200, { ok: true, service: "nexus-render-jobs", authorization: "signed", scope: claims.scope });
       }
 
+
+      if (isAssetDelete) {
+        if (claims.legacy || !claims.tenantId || !claims.projectId) return json(response, 401, { error: "signed project authorization required" });
+        try {
+          await deletePrivateAsset({ tenantId: claims.tenantId, projectId: claims.projectId, assetId: assetDeleteMatch[1], extension: "." + assetDeleteMatch[2] });
+          return json(response, 200, { deleted: true });
+        } catch {
+          return json(response, 502, { error: "private staged asset could not be deleted" });
+        }
+      }
 
       if (isAssetRead) {
         if (claims.legacy || !claims.tenantId || !claims.projectId) return json(response, 401, { error: "signed project authorization required" });
