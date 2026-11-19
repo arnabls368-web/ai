@@ -50,7 +50,7 @@ export async function readVideoBodyBounded(response) {
     }
   }
 
-  const chunks: Uint8Array[] = [];
+  const chunks = [];
   let total = 0;
   try {
     while (true) {
