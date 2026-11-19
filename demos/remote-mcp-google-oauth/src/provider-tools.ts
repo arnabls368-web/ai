@@ -4,7 +4,7 @@ import { env } from "cloudflare:workers";
 import { getMcpAuthContext } from "agents/mcp/server";
 import { readJsonLimited } from "./utils";
 import { classifyFalGenerationStatus } from "./fal-status.mjs";
-import { trustedFalUrl, validateFalJobRecord } from "./fal-provider-utils.mjs";
+import { tryPersistFalCompletion, trustedFalUrl, validateFalJobRecord } from "./fal-provider-utils.mjs";
 import { normalizeFalModelCatalogue, normalizeFalPricing } from "./fal-catalog-utils.mjs";
 import { buildFalCostEstimateRequest, normalizeFalCostEstimate } from "./fal-cost-estimate.mjs";
 import { requestHumanApproval } from "./human-approval.mjs";
@@ -346,8 +346,16 @@ export function registerProviderTools(server: McpServer) {
         const output = await providerJson(responseUrl, {
           headers: { Authorization: `Key ${apiKey}` },
         }, "fal.ai");
-        await env.OAUTH_KV.put(key, JSON.stringify({ ...job, completedAt: new Date().toISOString(), completed: true }), { expirationTtl: 60 * 60 * 24 * 7 });
-        return result({ status: "COMPLETED", endpointId: job.endpointId, requestId, output });
+        const tracking = await tryPersistFalCompletion(env.OAUTH_KV, key, job, new Date().toISOString());
+        return result({
+          status: "COMPLETED",
+          endpointId: job.endpointId,
+          requestId,
+          output,
+          ...(tracking.persisted ? {} : {
+            trackingWarning: "Generation completed and its output was retrieved, but NEXUS could not refresh the completion timestamp in KV. This does not affect the returned output; a later status check may retrieve the same output again.",
+          }),
+        });
       } catch (error) {
         return failure(error);
       }
