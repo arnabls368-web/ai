@@ -343,7 +343,7 @@ export function registerProviderTools(server: McpServer) {
         if (!apiKey) throw new Error("fal.ai is not configured on this Worker. Add FAL_KEY as a Cloudflare Worker secret.");
         const scope = await accountScope();
         const key = `nexus:fal-jobs:v1:${scope}:${requestId}`;
-        const job = await loadFalJobRecord({ kv: env.OAUTH_KV, key, scope, apiKey, requestId, endpointId, recoveryToken, verifyToken: verifyFalRecoveryToken, recoverRecord: recoverFalJobRecord });
+        const job = await loadFalJobRecord({ kv: env.OAUTH_KV, key, scope, apiKey, requestId, endpointId, recoveryToken, verifyToken: verifyFalRecoveryToken, recoverRecord: recoverFalJobRecord, validateRecord: validateFalJobRecord });
         // Treat KV records as untrusted at the point of use too: validate their
         // shape and provider origins before attaching the secret API key.
         const validatedJob = validateFalJobRecord(job, requestId);
@@ -396,7 +396,7 @@ export function registerProviderTools(server: McpServer) {
         if (!apiKey) throw new Error("fal.ai is not configured on this Worker. Add FAL_KEY as a Cloudflare Worker secret.");
         const scope = await accountScope();
         const key = "nexus:fal-jobs:v1:" + scope + ":" + requestId;
-        const job = await loadFalJobRecord({ kv: env.OAUTH_KV, key, scope, apiKey, requestId, endpointId, recoveryToken, verifyToken: verifyFalRecoveryToken, recoverRecord: recoverFalJobRecord });
+        const job = await loadFalJobRecord({ kv: env.OAUTH_KV, key, scope, apiKey, requestId, endpointId, recoveryToken, verifyToken: verifyFalRecoveryToken, recoverRecord: recoverFalJobRecord, validateRecord: validateFalJobRecord });
         const validatedJob = validateFalJobRecord(job, requestId);
         if (!validatedJob.cancelUrl) {
           throw new Error("This job predates cancellation support and has no saved fal.ai cancellation URL. It can still be checked with nexus_get_media_generation.");
