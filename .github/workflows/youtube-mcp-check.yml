@@ -50,4 +50,4 @@ jobs:
         with:
           node-version: 22
       - name: Run dependency-free upload source tests
-        run: node --test src/*.test.mjs
+        run: node --test src/*.test.mjs src/workers-oauth-utils.spec.mjs
