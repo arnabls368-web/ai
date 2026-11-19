@@ -197,3 +197,23 @@ test("buffers only the requested bounded stream range before a resumable PUT", a
   assert.ok(sent instanceof Uint8Array);
   assert.deepEqual([...sent], [1, 2, 3, 4, 5]);
 });
+
+
+test("rejects a server acknowledgement beyond the submitted staged chunk", async () => {
+  const totalBytes = 600 * 1024;
+  await assert.rejects(uploadResumableVideoFromRanges({
+    uploadUrl: "https://www.googleapis.com/upload/session",
+    totalBytes,
+    mimeType: "video/mp4",
+    accessToken: "test-token",
+    chunkBytes: 256 * 1024,
+    readRange: async (start, end) => ({
+      body: new Uint8Array(end - start + 1),
+      byteLength: end - start + 1,
+    }),
+    fetchImpl: async () => new Response(null, {
+      status: 308,
+      headers: { Range: "bytes=0-524287" },
+    }),
+  }), /acknowledged bytes beyond the submitted chunk/);
+});
