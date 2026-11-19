@@ -165,9 +165,9 @@ export function registerProviderTools(server: McpServer) {
       try {
         const apiKey = secret("FAL_KEY");
         if (!apiKey) throw new Error("fal.ai is not configured on this Worker. Add FAL_KEY as a Cloudflare Worker secret.");
-        if (estimateType === "historical_api_price" && (callQuantity === undefined || unitQuantity !== undefined)) throw new Error("historical_api_price requires callQuantity and does not accept unitQuantity.");
+        if (estimateType === "historical_api_price" && unitQuantity !== undefined) throw new Error("historical_api_price does not accept unitQuantity.");
         if (estimateType === "unit_price" && (unitQuantity === undefined || callQuantity !== undefined)) throw new Error("unit_price requires unitQuantity and does not accept callQuantity.");
-        const quantity = estimateType === "historical_api_price" ? callQuantity! : unitQuantity!;
+        const quantity = estimateType === "historical_api_price" ? (callQuantity ?? 1) : unitQuantity!;
         const estimate = await estimateFalCost(apiKey, endpointId, estimateType, quantity);
         return result({
           endpointId, ...estimate, quantity,
