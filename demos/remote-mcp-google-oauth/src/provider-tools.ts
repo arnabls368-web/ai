@@ -4,7 +4,7 @@ import { env } from "cloudflare:workers";
 import { getMcpAuthContext } from "agents/mcp/server";
 import { readJsonLimited } from "./utils";
 import { isFalGenerationFailed } from "./fal-status.mjs";
-import { trustedFalUrl } from "./fal-provider-utils.mjs";
+import { trustedFalUrl, validateFalJobRecord } from "./fal-provider-utils.mjs";
 import { requestHumanApproval } from "./human-approval.mjs";
 import { serializeApprovalBinding } from "./approval-binding.mjs";
 
@@ -211,15 +211,9 @@ export function registerProviderTools(server: McpServer) {
         if (!job) throw new Error("fal.ai job not found for this account, or its 7-day tracking record expired.");
         // Treat KV records as untrusted at the point of use too: validate their
         // shape and provider origins before attaching the secret API key.
-        if (job.requestId !== requestId ||
-            typeof job.endpointId !== "string" ||
-            !/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*){1,4}$/i.test(job.endpointId) ||
-            typeof job.statusUrl !== "string" ||
-            typeof job.responseUrl !== "string") {
-          throw new Error("The saved fal.ai job record is invalid; refusing to contact the provider.");
-        }
-        const statusUrl = trustedFalUrl(job.statusUrl);
-        const responseUrl = trustedFalUrl(job.responseUrl);
+        const validatedJob = validateFalJobRecord(job, requestId);
+        const statusUrl = validatedJob.statusUrl;
+        const responseUrl = validatedJob.responseUrl;
         const status = await providerJson(statusUrl, {
           headers: { Authorization: `Key ${apiKey}` },
         }, "fal.ai");
