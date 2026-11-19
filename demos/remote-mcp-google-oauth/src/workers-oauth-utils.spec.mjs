@@ -41,7 +41,7 @@ test("CSRF protection issues secure host cookie and accepts only its matching fo
   assert.throws(() => validateCSRFToken(mismatched, request), /CSRF token mismatch/);
 });
 
-test("approval dialog safely escapes client metadata and blocks unsafe links", () => {
+test("approval dialog safely escapes client metadata and blocks unsafe links", async () => {
   const response = renderApprovalDialog(
     new Request("https://worker.example/authorize?client=untrusted"),
     {
