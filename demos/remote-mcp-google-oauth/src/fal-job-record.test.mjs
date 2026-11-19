@@ -31,8 +31,8 @@ function fakeKv({ get = async () => null, put = async () => {} } = {}) {
 test("does not accept a cached record for a different supplied endpoint", async () => {
   const { kv, writes } = fakeKv({ get: async () => record });
   await assert.rejects(
-    loadFalJobRecord({ ...base, kv, endpointId: "fal-ai/different-model", recoveryToken: undefined }),
-    /record not found|could not read/,
+    loadFalJobRecord({ ...base, kv, endpointId: "fal-ai/different-model" }),
+    /record is invalid/,
   );
   assert.equal(writes.length, 0);
 });
