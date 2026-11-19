@@ -657,3 +657,37 @@ test("rejects traversal in private storage tenant and project identifiers", asyn
     prefix: "staged-assets",
   }), /identifier is invalid/);
 });
+
+
+test("preserves forbidden status when a private range request is denied", async () => {
+  const keys = ["AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION"];
+  const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  const originalFetch = globalThis.fetch;
+  try {
+    process.env.AWS_ENDPOINT_URL = "https://objects.example.test";
+    process.env.AWS_S3_BUCKET_NAME = "nexus-private";
+    process.env.AWS_ACCESS_KEY_ID = "test-access";
+    process.env.AWS_SECRET_ACCESS_KEY = "test-secret";
+    process.env.AWS_DEFAULT_REGION = "auto";
+    globalThis.fetch = async () => new Response("AccessDenied", { status: 403 });
+    const { getPrivateAssetRange } = await import("../src/storage.mjs");
+    await assert.rejects(
+      getPrivateAssetRange({
+        tenantId: "tenant-range",
+        projectId: "project-range",
+        assetId: "video-denied",
+        extension: ".mp4",
+        start: 0,
+        end: 3,
+        prefix: "staged-assets",
+      }),
+      (error) => error.status === 403,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
