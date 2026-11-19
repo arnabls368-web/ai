@@ -25,7 +25,7 @@ export async function loadFalJobRecord({
   }
   if (job) {
     try {
-      return validateRecord(job, requestId);
+      return validateRecord(job, requestId, endpointId);
     } catch {
       // Treat a malformed cached record as unavailable; only a signed
       // recovery capability may replace it with canonical queue URLs.
@@ -48,7 +48,7 @@ export async function loadFalJobRecord({
     throw new Error("fal.ai job record not found for this account. Recovery requires the endpointId and valid account-bound recoveryToken returned by the original submission.");
   }
 
-  const recovered = validateRecord(recoverRecord(endpointId, requestId), requestId);
+  const recovered = validateRecord(recoverRecord(endpointId, requestId), requestId, endpointId);
   try {
     await kv.put(key, JSON.stringify(recovered), { expirationTtl: 60 * 60 * 24 * 7 });
   } catch {
