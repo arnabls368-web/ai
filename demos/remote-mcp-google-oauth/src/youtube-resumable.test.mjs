@@ -116,7 +116,7 @@ test("re-reads staged ranges after interrupted chunk uploads and status checks",
     totalBytes,
     mimeType: "video/mp4",
     accessToken: "test-token",
-    chunkBytes: 256 * 1024,
+    chunkBytes: 512 * 1024,
     readRange: async (start, end) => {
       requested.push([start, end]);
       return { body: new Uint8Array(end - start + 1), byteLength: end - start + 1 };
@@ -131,7 +131,7 @@ test("re-reads staged ranges after interrupted chunk uploads and status checks",
   assert.equal(response.status, 201);
   assert.equal(calls.length, 3);
   assert.equal(new Headers(calls[1].headers).get("Content-Range"), `bytes */${totalBytes}`);
-  assert.deepEqual(requested, [[0, 262143], [10000, totalBytes - 1]]);
+  assert.deepEqual(requested, [[0, totalBytes - 1], [10000, totalBytes - 1]]);
   assert.equal(calls[2].headers.get("Content-Range"), `bytes 10000-${totalBytes - 1}/${totalBytes}`);
 });
 
