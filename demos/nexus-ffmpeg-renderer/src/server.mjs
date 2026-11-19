@@ -1,10 +1,11 @@
 import { createServer } from "node:http";
+import { Readable } from "node:stream";
 import { tmpdir } from "node:os";
 import { chmod, mkdir, mkdtemp, open, readdir, readFile, rename, rm, lstat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { constants as fsConstants } from "node:fs";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
-import { extensionForMime, getPrivateAsset, putPrivateAssetFile, MAX_ASSET_BYTES_LIMIT } from "./storage.mjs";
+import { extensionForMime, getPrivateAsset, getPrivateAssetRange, putPrivateAssetFile, MAX_ASSET_BYTES_LIMIT } from "./storage.mjs";
 import { renderManifest, validateManifest } from "./renderer.mjs";
 import { verifyRenderToken } from "./auth.mjs";
 
@@ -309,13 +310,53 @@ export function createRenderJobServer({
       const claims = requestClaims(request, {
         signingSecret,
         legacyToken: allowLegacyToken ? token : undefined,
-        scope: isSubmission ? "render:submit" : isAssetUpload ? "asset:write" : "render:read",
+        scope: isSubmission ? "render:submit" : isAssetUpload ? "asset:write" : isAssetRead ? "asset:read" : "render:read",
       });
       if (!claims) return json(response, 401, { error: "unauthorized" });
 
       if (request.method === "GET" && url.pathname === "/auth-check") {
         if (claims.legacy) return json(response, 401, { error: "signed authorization required" });
         return json(response, 200, { ok: true, service: "nexus-render-jobs", authorization: "signed", scope: claims.scope });
+      }
+
+
+      if (isAssetRead) {
+        if (claims.legacy || !claims.tenantId || !claims.projectId) return json(response, 401, { error: "signed project authorization required" });
+        const rangeHeader = request.headers.range ?? "";
+        const rangeMatch = rangeHeader.match(/^bytes=(\\d+)-(\\d+)$/);
+        if (!rangeMatch) return json(response, 400, { error: "a single explicit byte range is required" });
+        const start = Number(rangeMatch[1]);
+        const end = Number(rangeMatch[2]);
+        if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) ||
+            start < 0 || end < start || end - start + 1 > 8 * 1024 * 1024) {
+          return json(response, 400, { error: "requested byte range is invalid or exceeds 8 MiB" });
+        }
+        try {
+          const stored = await getPrivateAssetRange({
+            tenantId: claims.tenantId,
+            projectId: claims.projectId,
+            assetId: assetReadMatch[1],
+            extension: "." + assetReadMatch[2],
+            start,
+            end,
+          });
+          response.writeHead(206, {
+            "content-type": "application/octet-stream",
+            "content-length": String(stored.contentLength),
+            "content-range": stored.contentRange,
+            "accept-ranges": "bytes",
+            "cache-control": "no-store",
+            "x-content-type-options": "nosniff",
+          });
+          Readable.fromWeb(stored.body).pipe(response);
+          return;
+        } catch (error) {
+          if (error.status === 404 || error.status === 416) {
+            response.setHeader("content-range", error.status === 416 ? "bytes */*" : "");
+            return json(response, error.status, { error: error.message });
+          }
+          return json(response, 502, { error: "private staged asset could not be read" });
+        }
       }
 
       if (isAssetUpload) {
