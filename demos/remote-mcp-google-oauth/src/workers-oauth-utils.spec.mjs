@@ -57,8 +57,8 @@ test("approval dialog safely escapes client metadata and blocks unsafe links", a
         name: '<script>alert("server")</script>',
         description: "Review access before continuing",
       },
-      encodedState: "signed-state",
-      csrfToken: "csrf-token",
+      encodedState: '" onfocus="alert(1)',
+      csrfToken: '" autofocus onfocus="alert(2)',
       setCookie: "__Host-CSRF_TOKEN=csrf-token; HttpOnly; Secure; Path=/; SameSite=Lax",
     },
   );
