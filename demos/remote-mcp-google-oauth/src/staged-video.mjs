@@ -1,6 +1,7 @@
 export const MAX_STAGED_VIDEO_BYTES = 50 * 1024 * 1024;
 const VIDEO_EXTENSIONS = new Set(["mp4", "mov", "m4v", "webm", "mkv"]);
 const ASSET_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const MIME_EXTENSIONS = new Map([["video/mp4", "mp4"], ["video/quicktime", "mov"], ["video/webm", "webm"], ["video/x-matroska", "mkv"]]);
 
 /**
  * Stream a fetched video response into the authenticated private renderer.
@@ -56,15 +57,16 @@ export async function stageVideoSource({ source, mimeType, callRenderer, assetId
   } catch {
     throw new Error("Private renderer returned invalid staging metadata.");
   }
+  const expectedExtension = MIME_EXTENSIONS.get(mimeType);
   if (!record || record.assetId !== assetId ||
-      typeof record.filename !== "string" ||
-      !new RegExp("^" + assetId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\.(mp4|mov|m4v|webm|mkv)$").test(record.filename) ||
+      record.filename !== assetId + "." + expectedExtension ||
+      record.storage !== "private_object_storage" ||
       !Number.isSafeInteger(record.bytes) || record.bytes < 1 ||
       record.bytes > MAX_STAGED_VIDEO_BYTES ||
       typeof record.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(record.sha256)) {
     throw new Error("Private renderer returned invalid staged video metadata.");
   }
-  const extension = record.filename.slice(record.filename.lastIndexOf(".") + 1);
+  const extension = expectedExtension;
   if (!VIDEO_EXTENSIONS.has(extension)) throw new Error("Private renderer returned an unsupported video extension.");
   return { assetId, extension, totalBytes: record.bytes, sha256: record.sha256, mimeType };
 }
