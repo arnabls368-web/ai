@@ -1,12 +1,13 @@
 export const MAX_STAGED_VIDEO_BYTES = 50 * 1024 * 1024;
 const VIDEO_EXTENSIONS = new Set(["mp4", "mov", "m4v", "webm", "mkv"]);
+const ASSET_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
 /**
  * Stream a fetched video response into the authenticated private renderer.
  * The renderer persists it in private object storage and returns its digest.
  */
 export async function stageVideoSource({ source, mimeType, callRenderer, assetId = crypto.randomUUID() }) {
-  if (!source?.body || typeof callRenderer !== "function") {
+  if (!source?.body || typeof callRenderer !== "function" || !ASSET_ID_PATTERN.test(assetId)) {
     throw new Error("A readable video source and private renderer are required.");
   }
   if (!["video/mp4", "video/quicktime", "video/webm", "video/x-matroska"].includes(mimeType)) {
@@ -70,7 +71,7 @@ export async function stageVideoSource({ source, mimeType, callRenderer, assetId
 
 /** Create a fresh authenticated byte-range reader for resumable upload retries. */
 export function createStagedVideoRangeReader({ assetId, extension, totalBytes, callRenderer }) {
-  if (!VIDEO_EXTENSIONS.has(extension) || !Number.isSafeInteger(totalBytes) ||
+  if (!ASSET_ID_PATTERN.test(assetId) || !VIDEO_EXTENSIONS.has(extension) || !Number.isSafeInteger(totalBytes) ||
       totalBytes < 1 || totalBytes > MAX_STAGED_VIDEO_BYTES || typeof callRenderer !== "function") {
     throw new Error("Invalid staged video range-reader configuration.");
   }
@@ -101,7 +102,7 @@ export function createStagedVideoRangeReader({ assetId, extension, totalBytes, c
 
 /** Best-effort explicit cleanup; bucket lifecycle expiry remains the crash-safety backstop. */
 export async function deleteStagedVideoAsset({ assetId, extension, callRenderer }) {
-  if (!VIDEO_EXTENSIONS.has(extension) || typeof callRenderer !== "function") {
+  if (!ASSET_ID_PATTERN.test(assetId) || !VIDEO_EXTENSIONS.has(extension) || typeof callRenderer !== "function") {
     throw new Error("Invalid staged video cleanup configuration.");
   }
   const response = await callRenderer({
