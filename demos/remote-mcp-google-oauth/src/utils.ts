@@ -104,7 +104,8 @@ export async function fetchUpstreamAuthToken({
     // Log only transport error metadata. Never log the authorization code,
     // client secret, request body, access token, or full request URL.
     const primary = error instanceof Error ? error : undefined;
-    const cause = primary?.cause instanceof Error ? primary.cause : undefined;
+    const causeValue = (primary as (Error & { cause?: unknown }) | undefined)?.cause;
+    const cause = causeValue instanceof Error ? causeValue : undefined;
     const safeText = (value: string | undefined) =>
       value ? value.replace(/https?:\/\/[^\s]+/gi, "[url]").slice(0, 180) : undefined;
     console.error("Google token exchange transport failure", {
