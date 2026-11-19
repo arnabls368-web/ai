@@ -102,9 +102,9 @@ test("completion metadata persistence keeps the successful output path non-fatal
 test("reconstructs trusted fal queue URLs from a valid endpoint and UUID", () => {
   const requestId = "019a1b2c-3d4e-7f80-9a1b-2c3d4e5f6a7b";
   const record = recoverFalJobRecord("blackforestlabs/flux-3-max/text-to-video", requestId);
-  assert.equal(record.statusUrl, `https://queue.fal.run/blackforestlabs/flux-3-max/text-to-video/requests/${requestId}/status`);
-  assert.equal(record.responseUrl, `https://queue.fal.run/blackforestlabs/flux-3-max/text-to-video/requests/${requestId}`);
-  assert.equal(record.cancelUrl, `https://queue.fal.run/blackforestlabs/flux-3-max/text-to-video/requests/${requestId}/cancel`);
+  assert.equal(record.statusUrl, `https://queue.fal.run/blackforestlabs/flux-3-max/requests/${requestId}/status`);
+  assert.equal(record.responseUrl, `https://queue.fal.run/blackforestlabs/flux-3-max/requests/${requestId}`);
+  assert.equal(record.cancelUrl, `https://queue.fal.run/blackforestlabs/flux-3-max/requests/${requestId}/cancel`);
 });
 
 test("rejects invalid endpoint IDs and request IDs during fal job recovery", () => {
