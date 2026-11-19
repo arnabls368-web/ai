@@ -153,3 +153,17 @@ test("rejects invalid staged range sizes and non-aligned chunk configuration", a
     chunkBytes: 256 * 1024,
   }), /invalid body or byte length/);
 });
+
+test("does not query or retry a YouTube session when the private range reader fails", async () => {
+  let requests = 0;
+  await assert.rejects(uploadResumableVideoFromRanges({
+    uploadUrl: "https://www.googleapis.com/upload/session",
+    totalBytes: 300 * 1024,
+    mimeType: "video/mp4",
+    accessToken: "test-token",
+    chunkBytes: 256 * 1024,
+    readRange: async () => { throw new Error("private staging unavailable"); },
+    fetchImpl: async () => { requests += 1; return new Response(null, { status: 308 }); },
+  }), /private staging unavailable/);
+  assert.equal(requests, 0);
+});
