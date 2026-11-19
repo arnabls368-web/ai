@@ -250,3 +250,35 @@ test("rejects resumable session progress that moves backwards after a partial ch
     },
   }), /progress moved backwards/);
 });
+
+test("status-checks an existing upload session before resuming with a refreshed token", async () => {
+  const totalBytes = 300 * 1024;
+  const calls = [];
+  const requested = [];
+  const response = await uploadResumableVideoFromRanges({
+    uploadUrl: "https://www.googleapis.com/upload/session",
+    totalBytes,
+    mimeType: "video/mp4",
+    accessToken: "refreshed-token",
+    checkStatusFirst: true,
+    chunkBytes: 256 * 1024,
+    readRange: async (start, end) => {
+      requested.push([start, end]);
+      return { body: new Uint8Array(end - start + 1), byteLength: end - start + 1 };
+    },
+    fetchImpl: async (_url, init) => {
+      calls.push(init);
+      if (calls.length === 1) {
+        assert.equal(init.headers.get("Authorization"), "Bearer refreshed-token");
+        assert.equal(init.headers.get("Content-Range"), `bytes */${totalBytes}`);
+        return new Response(null, { status: 308, headers: { Range: "bytes=0-262143" } });
+      }
+      return new Response(JSON.stringify({ id: "video-id" }), { status: 201 });
+    },
+  });
+  assert.equal(response.status, 201);
+  assert.equal(calls.length, 2);
+  assert.deepEqual(requested, [[262144, totalBytes - 1]]);
+  assert.equal(calls[1].headers.get("Content-Range"), `bytes 262144-${totalBytes - 1}/${totalBytes}`);
+});
+
