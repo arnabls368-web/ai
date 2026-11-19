@@ -199,6 +199,29 @@ test("buffers only the requested bounded stream range before a resumable PUT", a
 });
 
 
+
+test("releases a malformed 308 response body when range validation fails", async () => {
+  let canceled = false;
+  await assert.rejects(uploadResumableVideoFromRanges({
+    uploadUrl: "https://www.googleapis.com/upload/session",
+    totalBytes: 300 * 1024,
+    mimeType: "video/mp4",
+    accessToken: "test-token",
+    chunkBytes: 256 * 1024,
+    readRange: async (start, end) => ({
+      body: new Uint8Array(end - start + 1),
+      byteLength: end - start + 1,
+    }),
+    fetchImpl: async () => new Response(new ReadableStream({
+      cancel() { canceled = true; },
+    }), {
+      status: 308,
+      headers: { Range: "bytes=1-10" },
+    }),
+  }), /invalid resumable-upload range/);
+  assert.equal(canceled, true);
+});
+
 test("rejects a server acknowledgement beyond the submitted staged chunk", async () => {
   const totalBytes = 600 * 1024;
   await assert.rejects(uploadResumableVideoFromRanges({
