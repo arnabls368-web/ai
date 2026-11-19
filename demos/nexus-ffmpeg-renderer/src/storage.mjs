@@ -38,7 +38,7 @@ function hmac(key, value, encoding) {
   return createHmac("sha256", key).update(value, "utf8").digest(encoding);
 }
 
-function signedRequest({ method, key, body, contentType, payloadHash: suppliedPayloadHash, contentLength }) {
+function signedRequest({ method, key, body, contentType, payloadHash: suppliedPayloadHash, contentLength, range }) {
   const { bucket, base, region, accessKeyId, secretAccessKey } = config();
   const urlStyle = process.env.AWS_S3_URL_STYLE ?? "path";
   let url;
@@ -63,6 +63,7 @@ function signedRequest({ method, key, body, contentType, payloadHash: suppliedPa
   };
   if (contentType) headers["content-type"] = contentType;
   if (contentLength !== undefined) headers["content-length"] = String(contentLength);
+  if (range) headers.range = range;
   const signedHeaders = Object.keys(headers).sort().join(";");
   const canonicalHeaders = Object.keys(headers).sort().map((name) =>
     name + ":" + String(headers[name]).trim() + "\n"
@@ -132,13 +133,14 @@ export async function putPrivateAssetFile({ tenantId, projectId, assetId, mimeTy
   }
   const digest = createHash("sha256");
   for await (const chunk of createReadStream(filePath)) digest.update(chunk);
+  const sha256 = digest.digest("hex");
   const key = objectKey(tenantId, projectId, assetId, extension);
   const response = await signedRequest({
     method: "PUT",
     key,
     body: createReadStream(filePath),
     contentType: String(mimeType).split(";")[0].trim().toLowerCase(),
-    payloadHash: digest.digest("hex"),
+    payloadHash: sha256,
     contentLength: info.size,
   });
   if (!response.ok) {
@@ -147,7 +149,7 @@ export async function putPrivateAssetFile({ tenantId, projectId, assetId, mimeTy
     throw new Error("Private object storage rejected asset upload (HTTP " + status + ").");
   }
   await response.body?.cancel();
-  return { key, extension, bytes: info.size };
+  return { key, extension, bytes: info.size, sha256 };
 }
 
 export async function getPrivateAsset({ tenantId, projectId, assetId, extension }) {
@@ -182,6 +184,49 @@ export async function getPrivateAsset({ tenantId, projectId, assetId, extension 
   }
   if (!size) throw new Error("Stored asset is empty.");
   return Buffer.concat(chunks, size);
+}
+
+
+/**
+ * Fetch one bounded byte range without buffering the object in renderer memory.
+ * The caller owns and must consume or cancel the returned response body.
+ */
+export async function getPrivateAssetRange({ tenantId, projectId, assetId, extension, start, end }) {
+  if (!/^\\.(?:mp4|mov|m4v|webm|mkv)$/i.test(extension)) {
+    throw new Error("Unsupported staged video extension.");
+  }
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) ||
+      start < 0 || end < start || end - start + 1 > 8 * 1024 * 1024) {
+    throw new Error("Requested asset range is invalid or exceeds 8 MiB.");
+  }
+  const response = await signedRequest({
+    method: "GET",
+    key: objectKey(tenantId, projectId, assetId, extension),
+    range: `bytes=${start}-${end}`,
+  });
+  if (response.status === 404) {
+    await response.body?.cancel();
+    throw Object.assign(new Error("Private staged asset was not found."), { status: 404 });
+  }
+  if (response.status === 416) {
+    await response.body?.cancel();
+    throw Object.assign(new Error("Requested asset range is not satisfiable."), { status: 416 });
+  }
+  if (response.status !== 206 || !response.body) {
+    await response.body?.cancel();
+    throw new Error("Private object storage did not return a valid partial response.");
+  }
+  const contentRange = response.headers.get("content-range") ?? "";
+  const match = contentRange.match(/^bytes (\\d+)-(\\d+)\\/(\\d+)$/);
+  const contentLength = Number(response.headers.get("content-length"));
+  const totalBytes = match ? Number(match[3]) : NaN;
+  if (!match || Number(match[1]) !== start || Number(match[2]) !== end ||
+      !Number.isSafeInteger(totalBytes) || totalBytes < 1 || totalBytes > MAX_ASSET_BYTES ||
+      end >= totalBytes || contentLength !== end - start + 1) {
+    await response.body.cancel();
+    throw new Error("Private object storage returned inconsistent range metadata.");
+  }
+  return { body: response.body, contentRange, contentLength, totalBytes };
 }
 
 export const MAX_ASSET_BYTES_LIMIT = MAX_ASSET_BYTES;
