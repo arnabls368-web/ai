@@ -149,14 +149,23 @@ export function createRenderJobServer({
     const restored = [];
     for (const entry of entries) {
       if (!entry.isDirectory() || !UUID_PATTERN.test(entry.name)) continue;
+      const directoryPath = path.join(workRoot, entry.name);
+      const directoryInfo = await lstat(directoryPath);
+      if (!directoryInfo.isDirectory()) continue;
+      const recordPath = path.join(directoryPath, "job.json");
+      let record;
       try {
-        const directoryPath = path.join(workRoot, entry.name);
-        const directoryInfo = await lstat(directoryPath);
-        if (!directoryInfo.isDirectory()) continue;
-        const recordPath = path.join(directoryPath, "job.json");
         const recordInfo = await lstat(recordPath);
         if (!recordInfo.isFile() || recordInfo.size > MAX_BODY_BYTES) continue;
-        const record = JSON.parse(await readFile(recordPath, "utf8"));
+        record = JSON.parse(await readFile(recordPath, "utf8"));
+      } catch (error) {
+        // A missing or malformed record is incomplete and can be ignored.
+        // Other filesystem failures (permissions, I/O, full disk, etc.) must
+        // abort startup rather than silently hiding persisted jobs.
+        if (error instanceof SyntaxError || error?.code === "ENOENT") continue;
+        throw error;
+      }
+      try {
         if (!record || typeof record !== "object" || Array.isArray(record) ||
             record.id !== entry.name || !["queued", "running", "succeeded", "failed"].includes(record.status) ||
             typeof record.createdAt !== "string" || !Number.isFinite(Date.parse(record.createdAt)) ||
@@ -164,35 +173,44 @@ export function createRenderJobServer({
             !record.assetMap || typeof record.assetMap !== "object" || Array.isArray(record.assetMap) ||
             Object.keys(record.assetMap).length > 502 ||
             Object.entries(record.assetMap).some(([id, file]) =>
-              !id || id.length > 128 || typeof file !== "string" || !file || file.length > 512 || file.includes("\0")) ||
+              !id || id.length > 128 || typeof file !== "string" || !file || file.length > 512 || file.includes("\\0")) ||
             !((record.tenantId === null && record.projectId === null) ||
               (typeof record.tenantId === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(record.tenantId) &&
-               typeof record.projectId === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(record.projectId)))) continue;
-        validateManifest(record.manifest, record.assetMap);
-        const job = { ...record };
-        if (job.status === "running" || job.status === "queued") {
-          job.status = "queued";
-          delete job.startedAt;
-          delete job.error;
-        } else if (job.status === "succeeded") {
-          try {
-            const output = await lstat(path.join(workRoot, job.id, "render.mp4"));
-            if (!output.isFile() || output.size === 0) throw new Error("Restored render output is not a non-empty regular file.");
-            job.outputPath = path.join(workRoot, job.id, "render.mp4");
-            job.outputBytes = output.size;
-          } catch {
-            job.status = "failed";
-            job.error = "Completed output was missing when the render service restarted.";
-            job.completedAt = new Date().toISOString();
-            delete job.outputPath;
-          }
+               typeof record.projectId === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(record.projectId))) {
+          continue;
         }
-        jobs.set(job.id, job);
-        if (job.status === "queued") restored.push(job);
-        await persistJob(job);
+        validateManifest(record.manifest, record.assetMap);
       } catch {
-        // Ignore malformed/incomplete records; never trust directory names as paths.
+        // Ignore records that fail schema or manifest validation.
+        continue;
       }
+      const job = { ...record };
+      if (job.status === "running" || job.status === "queued") {
+        job.status = "queued";
+        delete job.startedAt;
+        delete job.error;
+      } else if (job.status === "succeeded") {
+        let output;
+        try {
+          output = await lstat(path.join(workRoot, job.id, "render.mp4"));
+        } catch (error) {
+          if (error?.code !== "ENOENT") throw error;
+        }
+        if (!output || !output.isFile() || output.size === 0) {
+          job.status = "failed";
+          job.error = "Completed output was missing when the render service restarted.";
+          job.completedAt = new Date().toISOString();
+          delete job.outputPath;
+        } else {
+          job.outputPath = path.join(workRoot, job.id, "render.mp4");
+          job.outputBytes = output.size;
+        }
+      }
+      jobs.set(job.id, job);
+      if (job.status === "queued") restored.push(job);
+      // Persistence failures are fatal: do not start with partially recovered
+      // in-memory state that could diverge from the durable job records.
+      await persistJob(job);
     }
     restored.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     const accepted = restored.slice(0, MAX_QUEUE_SIZE);
