@@ -946,7 +946,7 @@ test("signed asset upload rejects an oversized declared body before reading it",
         request.end();
       });
       assert.equal(result.status, 413);
-      assert.deepEqual(JSON.parse(result.body), { error: "Asset exceeds the 100 MiB limit." });
+      assert.deepEqual(JSON.parse(result.body), { error: "Asset exceeds the configured 100 MiB limit." });
     } finally {
       await server.close();
     }
