@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { tmpdir } from "node:os";
 import { chmod, mkdir, mkdtemp, open, readdir, readFile, rename, rm, lstat, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -395,7 +396,7 @@ export function createRenderJobServer({
             "cache-control": "no-store",
             "x-content-type-options": "nosniff",
           });
-          Readable.fromWeb(stored.body).pipe(response);
+          await pipeline(Readable.fromWeb(stored.body), response);
           return;
         } catch (error) {
           if (error.status === 403 || error.status === 404) {
