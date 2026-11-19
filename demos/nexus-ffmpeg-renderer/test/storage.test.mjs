@@ -437,6 +437,7 @@ test("sweeps only expired video objects under the staged-assets prefix", async (
           '<Contents><Key>staged-assets/tenant-a/project-a/image.png</Key><LastModified>2026-11-17T00:00:00.000Z</LastModified></Contents>' +
           '<Contents><Key>staged-assets/../../assets/tenant/project/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.mp4</Key><LastModified>2026-11-17T00:00:00.000Z</LastModified></Contents>' +
           '<Contents><Key>STAGED-ASSETS/tenant-a/project-a/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.mp4</Key><LastModified>2026-11-17T00:00:00.000Z</LastModified></Contents>' +
+          '<IsTruncated>false</IsTruncated>' +
           '</ListBucketResult>';
         return new Response(xml);
       }
