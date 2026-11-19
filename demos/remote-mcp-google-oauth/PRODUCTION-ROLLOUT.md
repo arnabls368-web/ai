@@ -31,6 +31,7 @@ The Wrangler files declare the SQLite-backed `OAUTH_STATE` binding and the first
 2. Review the exact Wrangler diff. Preserve the existing `OAUTH_KV` binding, production secrets, `MCP_RESOURCE`, compatibility flags/date, and unrelated settings.
 3. Verify that the Worker code, `OAuthStateDO` class export, binding name, and `v1` migration are all present in the same reviewed commit.
 4. Confirm Cloudflare's current Durable Objects migration and deployment semantics, including whether the migration is additive and whether any existing class/storage will be affected. If the live migration history is uncertain, stop and obtain a Cloudflare-specific recovery plan.
+   - Cloudflare documents legacy Durable Object class migrations as atomic operations that cannot be gradually deployed. Do not plan a canary/percentage rollout for the `OAUTH_STATE` class-creation migration; treat it as a single deployment gate and verify the post-deploy binding/migration state immediately.
 5. Only after explicit deployment approval, deploy the reviewed Worker with the pinned Wrangler version and inspect the resulting deployment/version. Do not use a broad account token or print secret values.
 6. Verify the deployed script has `OAUTH_STATE` bound to `OAuthStateDO`, and the migration is recorded as applied.
 7. Run OAuth verification with a dedicated test Google account/client where possible:
