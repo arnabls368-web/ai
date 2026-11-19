@@ -133,3 +133,17 @@ test("rejects staged asset identifiers that could escape the renderer route", as
   }), /readable video source and private renderer/);
   assert.equal(called, false);
 });
+
+
+test("rejects a declared oversized source before contacting private staging", async () => {
+  let called = false;
+  const source = new Response(new Uint8Array([1]), {
+    headers: { "content-length": String(MAX_STAGED_VIDEO_BYTES + 1) },
+  });
+  await assert.rejects(stageVideoSource({
+    source,
+    mimeType: "video/mp4",
+    callRenderer: async () => { called = true; return Response.json({}); },
+  }), /between 1 byte and 50 MiB/);
+  assert.equal(called, false);
+});
