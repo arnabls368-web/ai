@@ -908,6 +908,21 @@ test("signed asset-write authorization stores uploaded bytes in private object s
         assert.equal(storedRequest.payloadHash, createHash("sha256").update(bytes).digest("hex"));
         assert.equal(storedRequest.duplex, "half");
         assert.ok(storedRequest.url.startsWith("https://nexus-private.objects.example.test/assets/tenant-a/project-1/"));
+
+        const stagedBytes = Buffer.from("temporary-video-bytes");
+        const stagedResponse = await originalFetch(`${server.base}/staged-assets/video-1`, {
+          method: "PUT",
+          headers: {
+            ...signedHeader("tenant-a", "project-1", "asset:write"),
+            "content-type": "video/mp4",
+          },
+          body: stagedBytes,
+        });
+        assert.equal(stagedResponse.status, 201);
+        assert.equal((await stagedResponse.json()).filename, "video-1.mp4");
+        assert.equal(storedRequest.method, "PUT");
+        assert.deepEqual(storedRequest.body, stagedBytes);
+        assert.ok(storedRequest.url.startsWith("https://nexus-private.objects.example.test/staged-assets/tenant-a/project-1/"));
       } finally {
         await server.close();
       }
