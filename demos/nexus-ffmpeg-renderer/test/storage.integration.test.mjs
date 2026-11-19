@@ -20,10 +20,8 @@ const credentialsPresent = Boolean(
 );
 
 test("real S3-compatible staged-object PUT, range GET, tenant isolation and DELETE", {
-  skip: !enabled
-    ? "Set NEXUS_STORAGE_INTEGRATION=true to opt in."
-    : "Integration requires a dedicated test bucket explicitly confirmed by name.",
-}, async (t) => {
+  skip: !enabled && "Set NEXUS_STORAGE_INTEGRATION=true to opt in.",
+}, async () => {
   assert.ok(bucket, "AWS_S3_BUCKET_NAME is required.");
   assert.equal(confirmedBucket, bucket,
     "NEXUS_STORAGE_INTEGRATION_BUCKET_CONFIRM must exactly match AWS_S3_BUCKET_NAME.");
