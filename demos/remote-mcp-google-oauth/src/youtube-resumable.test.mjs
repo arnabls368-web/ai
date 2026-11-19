@@ -233,7 +233,7 @@ test("rejects resumable session progress that moves backwards after a partial ch
       byteLength: end - start + 1,
     }),
     fetchImpl: async (_url, init) => {
-      if (init.headers.get("Content-Range") === "bytes */" + totalBytes) {
+      if (new Headers(init.headers).get("Content-Range") === "bytes */" + totalBytes) {
         return new Response(null, {
           status: 308,
           headers: { Range: "bytes=0-0" },
