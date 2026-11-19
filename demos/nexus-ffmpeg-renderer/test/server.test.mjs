@@ -88,7 +88,7 @@ test("HTTP server applies bounded request and keep-alive timeouts", async () => 
   await withWorkRoot(async (workRoot) => {
     const instance = await startServer(workRoot);
     try {
-      assert.equal(instance.server.requestTimeout, 30_000);
+      assert.equal(instance.server.requestTimeout, 120_000);
       assert.equal(instance.server.headersTimeout, 15_000);
       assert.equal(instance.server.keepAliveTimeout, 5_000);
     } finally {
