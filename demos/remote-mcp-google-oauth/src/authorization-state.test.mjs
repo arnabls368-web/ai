@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { signAuthorizationState, verifyAuthorizationState } from "./workers-oauth-utils.ts";
+import { signAuthorizationState, verifyAuthorizationState } from "./authorization-state.mjs";
 
 const secret = "test-cookie-encryption-secret-with-sufficient-entropy";
 
