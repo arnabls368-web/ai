@@ -238,7 +238,7 @@ export function registerProviderTools(server: McpServer) {
   server.registerTool(
     "nexus_submit_media_generation",
     {
-      description: "Submit an image, voice, music or video generation request to a fal.ai model endpoint. Requires FAL_KEY and interactive user approval before any billable request is sent. The approval dialog displays the exact endpoint and input. Use an exact endpoint ID from fal's model catalogue; pass model-specific input matching that model's schema. The result is asynchronous.",
+      description: "Submit an image, voice, music or video generation request to a fal.ai model endpoint. NEXUS first obtains a historical one-call cost estimate and includes it in the approval dialog; if estimation fails, submission fails closed. Requires FAL_KEY and interactive user approval before any billable request is sent. The approval dialog displays the exact endpoint, input and advisory estimate. Use an exact endpoint ID from fal model catalogue; pass model-specific input matching that model schema. The result is asynchronous.",
       inputSchema: z.object({
         endpointId: z.string().min(3).max(200).regex(/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*){1,4}$/i),
         input: z.record(z.string(), z.unknown()),
