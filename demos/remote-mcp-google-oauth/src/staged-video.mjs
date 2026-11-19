@@ -11,6 +11,14 @@ export async function stageVideoSource({ source, mimeType, callRenderer, assetId
   if (!source?.body || typeof callRenderer !== "function" || !ASSET_ID_PATTERN.test(assetId)) {
     throw new Error("A readable video source and private renderer are required.");
   }
+  const declaredLengthHeader = source.headers?.get("content-length");
+  if (declaredLengthHeader !== null && declaredLengthHeader !== undefined) {
+    const declaredLength = Number(declaredLengthHeader);
+    if (!Number.isSafeInteger(declaredLength) || declaredLength < 1 || declaredLength > MAX_STAGED_VIDEO_BYTES) {
+      await source.body.cancel();
+      throw new Error("The video source must declare a size between 1 byte and 50 MiB.");
+    }
+  }
   if (!["video/mp4", "video/quicktime", "video/webm", "video/x-matroska"].includes(mimeType)) {
     await source.body.cancel();
     throw new Error("The video source must be MP4, MOV, WebM, or Matroska.");
