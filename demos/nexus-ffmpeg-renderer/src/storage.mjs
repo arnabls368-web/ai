@@ -257,6 +257,34 @@ function xmlTag(block, name) {
   return match ? decodeXml(match[1]) : null;
 }
 
+async function readResponseTextBounded(response, maxBytes) {
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const chunks = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) {
+        await reader.cancel("Response exceeds configured size limit.");
+        throw new Error("Staged asset listing response exceeded 2 MiB.");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+}
+
 /**
  * Remove only old video objects in the isolated staged-assets namespace.
  * LastModified is supplied by ListObjectsV2; the 24-hour grace period
@@ -292,8 +320,7 @@ export async function cleanupStagedAssets({
       await response.body?.cancel();
       throw new Error("Private staged asset listing failed (HTTP " + status + ").");
     }
-    const xml = await response.text();
-    if (xml.length > 2 * 1024 * 1024) throw new Error("Staged asset listing response exceeded 2 MiB.");
+    const xml = await readResponseTextBounded(response, 2 * 1024 * 1024);
     pages += 1;
     for (const match of xml.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)) {
       const key = xmlTag(match[1], "Key");
