@@ -33,7 +33,18 @@ export class OAuthStateDO {
         return true;
       });
       if (!stored) return Response.json({ error: "OAuth state already exists" }, { status: 409 });
-      await this.state.storage.setAlarm(body.expiresAt);
+      try {
+        await this.state.storage.setAlarm(body.expiresAt);
+      } catch {
+        // Do not leave an uncollectable state record if expiry scheduling fails.
+        await this.state.storage.transaction(async (transaction) => {
+          const current = await transaction.get<StoredOAuthState>("oauth-state");
+          if (current?.value === body.value && current.expiresAt === body.expiresAt) {
+            await transaction.delete("oauth-state");
+          }
+        });
+        return Response.json({ error: "could not schedule OAuth state expiry" }, { status: 503 });
+      }
       return Response.json({ stored: true }, { status: 201 });
     }
 
