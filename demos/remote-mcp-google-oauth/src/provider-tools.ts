@@ -5,6 +5,7 @@ import { getMcpAuthContext } from "agents/mcp/server";
 import { readJsonLimited } from "./utils";
 import { isFalGenerationFailed } from "./fal-status.mjs";
 import { trustedFalUrl, validateFalJobRecord } from "./fal-provider-utils.mjs";
+import { normalizeFalModelCatalogue, normalizeFalPricing } from "./fal-catalog-utils.mjs";
 import { requestHumanApproval } from "./human-approval.mjs";
 import { serializeApprovalBinding } from "./approval-binding.mjs";
 
@@ -99,20 +100,8 @@ export function registerProviderTools(server: McpServer) {
         const data = await providerJson(url.toString(), {
           headers: { Authorization: `Key ${apiKey}`, Accept: "application/json" },
         }, "fal.ai model catalogue");
-        if (!Array.isArray(data.models)) throw new Error("fal.ai returned an invalid model catalogue response.");
         return result({
-          models: data.models.slice(0, limit).map((model: any) => ({
-            endpointId: model.endpoint_id,
-            name: model.metadata?.display_name,
-            category: model.metadata?.category,
-            description: model.metadata?.description,
-            status: model.metadata?.status,
-            tags: Array.isArray(model.metadata?.tags) ? model.metadata.tags.slice(0, 12) : [],
-            modelUrl: model.metadata?.model_url,
-            ...(includeSchema && model.openapi ? { openapi: model.openapi } : {}),
-          })),
-          nextCursor: typeof data.next_cursor === "string" ? data.next_cursor : null,
-          hasMore: data.has_more === true,
+          ...normalizeFalModelCatalogue(data, limit, includeSchema),
           note: "Use the exact endpointId and inspect its schema before submitting generation. Catalogue metadata is not a price quote; check pricing separately. Search is read-only and does not create a billable job.",
         });
       } catch (error) {
@@ -138,14 +127,8 @@ export function registerProviderTools(server: McpServer) {
         const data = await providerJson(url.toString(), {
           headers: { Authorization: `Key ${apiKey}`, Accept: "application/json" },
         }, "fal.ai pricing");
-        if (!Array.isArray(data.prices)) throw new Error("fal.ai returned an invalid pricing response.");
         return result({
-          endpointId,
-          prices: data.prices.slice(0, 20).map((price: any) => ({
-            unitPrice: price.unit_price,
-            unit: price.unit,
-            currency: price.currency,
-          })),
+          ...normalizeFalPricing(data, endpointId),
           note: "Prices and billing units are provider-reported and may change. Video models may bill per generated second or per video. Check the model's current pricing immediately before approving generation; this is not a guaranteed final charge.",
         });
       } catch (error) {
