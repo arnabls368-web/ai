@@ -1249,3 +1249,41 @@ test("requires bucket configuration when staged cleanup is enabled", async () =>
     }
   });
 });
+
+
+test("private staged asset denials are normalized to not-found for reads and deletes", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const keys = ["AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION"];
+    const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    const originalFetch = globalThis.fetch;
+    process.env.AWS_ENDPOINT_URL = "https://objects.example.test";
+    process.env.AWS_S3_BUCKET_NAME = "nexus-private";
+    process.env.AWS_ACCESS_KEY_ID = "test-access";
+    process.env.AWS_SECRET_ACCESS_KEY = "test-secret";
+    process.env.AWS_DEFAULT_REGION = "auto";
+    const instance = await startSignedServer(workRoot);
+    globalThis.fetch = async (url, init) => {
+      if (String(url).startsWith(instance.base)) return originalFetch(url, init);
+      return new Response("AccessDenied", { status: 403 });
+    };
+    try {
+      const read = await originalFetch(instance.base + "/staged-assets/hidden-video/mp4", {
+        headers: { ...signedHeader("tenant-a", "project-a", "asset:read"), range: "bytes=0-3" },
+      });
+      assert.equal(read.status, 404);
+      const deletion = await originalFetch(instance.base + "/staged-assets/hidden-video/mp4", {
+        method: "DELETE",
+        headers: signedHeader("tenant-a", "project-a", "asset:delete"),
+      });
+      assert.equal(deletion.status, 404);
+      assert.deepEqual(await deletion.json(), { error: "staged asset not found" });
+    } finally {
+      globalThis.fetch = originalFetch;
+      await instance.close();
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+});
