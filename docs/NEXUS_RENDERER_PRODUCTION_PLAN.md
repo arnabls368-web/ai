@@ -2,13 +2,15 @@
 
 Status: partially implemented and deployed; production end-to-end verification is still outstanding. This document distinguishes implemented code and deployed infrastructure from capabilities that have not yet been proven against live providers.
 
-## Current rollout checkpoint (2026-11-18)
+## Current rollout checkpoint (2026-11-19)
 
-- The feature-branch renderer Dockerfile now declares `USER node`. Its entrypoint expects Railway's documented `RAILWAY_RUN_UID=0` override so the entrypoint starts with root privileges, prepares only the mounted `/work` and `/assets` directory roots, and then drops the Node application to the unprivileged `node` account with `gosu`.
-- The currently configured Railway renderer service does **not** have `RAILWAY_RUN_UID` set. Do not deploy this Dockerfile revision to the existing service until that variable is explicitly configured and the rollout is approved; otherwise the entrypoint will start as `node` and cannot chown the root-owned mounted volume.
-- Railway's official volume guidance documents `RAILWAY_RUN_UID=0` as the runtime override for images that need access to root-owned volume mounts. This does not change volume ownership; the application still drops to `node` after initialization.
-- Latest code-validation head: `4ac7a7b9c786c5185c6669d169870f633965bda2`. Its main CI, renderer workflow (including Docker build, FFmpeg smoke encode, non-root startup and persistent-volume preservation test), YouTube deployment-bundle build, type check, uploader source tests, and Semgrep scan all completed successfully. Semgrep reported **0 findings** across 749 tracked files (517 rules run).
-- The YouTube MCP Cloudflare deployment workflow is now manual-only (`workflow_dispatch`); pushing to the feature branch cannot automatically deploy the Worker.
+- Latest reviewed feature-branch head: `0ffe4ecd0967f1248e6e2d10290c8262df7d08cb`.
+- All workflows for this head completed successfully, except the prerelease workflow which was correctly skipped: main CI, Semgrep OSS scan, NEXUS FFmpeg renderer, YouTube MCP type check, and deployment-bundle build.
+- The renderer workflow passed unit tests, container build, a real FFmpeg encode smoke test, non-root startup, and persistent-volume checks. These are CI/container validations; they do not prove the currently deployed Railway service has been switched to the repository Dockerfile.
+- The live Railway renderer is still configured to use Railpack, with one replica and the persistent volume mounted at `/work`. The Dockerfile's `RAILWAY_RUN_UID=0` entrypoint path is not a current live-service prerequisite unless an operator deliberately changes the builder to Dockerfile and approves that rollout.
+- The Cloudflare Worker remains on its existing production version. Its live configuration still lacks the `OAUTH_STATE` Durable Object binding/migration required by the current OAuth state implementation. Do not treat the new OAuth state flow as production-ready until the migration and binding are deployed and verified.
+- The Cloudflare deployment workflow is manual-only (`workflow_dispatch`) and its credential-bearing deployment job is restricted to `refs/heads/main`. This is a workflow guard, not a substitute for branch protection, environment approvals, or explicit rollout authorization.
+- The feature PR remains open and in draft. No production Worker deployment, Durable Object migration, Railway deployment/configuration change, S3 write/delete integration test, or YouTube upload was performed as part of this validation.
 
 ## Current architecture
 
@@ -38,8 +40,8 @@ Status: partially implemented and deployed; production end-to-end verification i
 - Renderer storage code signs S3-compatible PUT and GET requests and uses tenant/project-scoped object keys.
 - Automated storage tests verify signing, virtual-host addressing, and PUT/GET round trips against a mocked storage endpoint.
 - Renderer tests cover manifest validation, signed authorization, job ownership, bounded queue recovery, symlink defenses, and owner-only local file permissions.
-- Latest CI on `4ac7a7b9c786c5185c6669d169870f633965bda2` passed the main CI workflow, renderer Docker build and FFmpeg smoke encode, non-root startup and volume-preservation checks, Worker type check, uploader source tests, and deployment-bundle build. Semgrep scanned 749 tracked files with 517 rules and reported zero findings.
-- The latest Semgrep scan completed successfully with zero findings. This scan result does not replace live-provider verification or the Railway volume configuration prerequisite.
+- Latest CI on `0ffe4ecd0967f1248e6e2d10290c8262df7d08cb` passed main CI, the renderer Docker/FFmpeg/non-root/volume checks, YouTube MCP type checks, deployment-bundle build, and Semgrep OSS scan.
+- The latest Semgrep workflow completed successfully. A successful scan does not replace live-provider verification.
 - The deployed renderer health endpoint has returned HTTP 200, and the latest deployment started successfully.
 
 ## Not yet verified
@@ -60,7 +62,7 @@ Mocked storage tests and a healthy HTTP endpoint must not be described as proof 
 - Asset transfer buffers up to 100 MiB in the Worker; YouTube upload buffers up to 50 MiB. Do not raise these limits without redesigning memory use.
 - Private object lifecycle cleanup, orphan handling, quotas, and retention policy need implementation and verification.
 - Railway HTTPS ingress is publicly addressable even though the API requires signed authorization. Private-network-only ingress remains a possible hardening improvement.
-- The renderer entrypoint requires the Railway runtime UID override described in the current rollout checkpoint; do not deploy until that prerequisite is configured and rollout approval is given.
+- If the Railway service is intentionally switched from Railpack to the repository Dockerfile, review its entrypoint and mounted-volume ownership requirements (including the documented runtime UID override) before rollout. This is not a requirement for the currently configured Railpack service.
 
 ## Rollout gates
 
