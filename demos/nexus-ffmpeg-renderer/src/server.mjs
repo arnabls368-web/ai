@@ -203,6 +203,8 @@ export function createRenderJobServer({
             Object.keys(record.assetMap).length > 502 ||
             Object.entries(record.assetMap).some(([id, file]) =>
               !id || id.length > 128 || typeof file !== "string" || !file || file.length > 512 || file.includes("\0")) ||
+            (record.idempotencyKey !== undefined &&
+              (typeof record.idempotencyKey !== "string" || !/^[0-9a-f]{64}$/i.test(record.idempotencyKey))) ||
             !((record.tenantId === null && record.projectId === null) ||
               (typeof record.tenantId === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(record.tenantId) &&
                typeof record.projectId === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(record.projectId)))) {
@@ -468,6 +470,10 @@ export function createRenderJobServer({
               !body.assetMap || typeof body.assetMap !== "object" || Array.isArray(body.assetMap)) {
             return json(response, 400, { error: "manifest and assetMap are required" });
           }
+          if (body.idempotencyKey !== undefined &&
+              (typeof body.idempotencyKey !== "string" || !/^[0-9a-f]{64}$/i.test(body.idempotencyKey))) {
+            return json(response, 400, { error: "idempotencyKey must be a 64-character SHA-256 hex digest" });
+          }
           const assetEntries = Object.entries(body.assetMap);
           if (assetEntries.length > 502 || assetEntries.some(([id, file]) =>
             typeof id !== "string" || !id || id.length > 128 ||
@@ -480,6 +486,20 @@ export function createRenderJobServer({
           } catch (error) {
             return json(response, 400, { error: String(error?.message ?? error).slice(0, 500) });
           }
+          const idempotencyMatch = body.idempotencyKey
+            ? [...jobs.values()].find((candidate) =>
+                candidate.idempotencyKey === body.idempotencyKey &&
+                candidate.tenantId === claims.tenantId &&
+                candidate.projectId === claims.projectId)
+            : null;
+          if (idempotencyMatch) {
+            return json(response, 202, {
+              id: idempotencyMatch.id,
+              status: idempotencyMatch.status,
+              statusUrl: `/jobs/${idempotencyMatch.id}`,
+              deduplicated: true,
+            });
+          }
           const id = randomUUID();
           const job = {
             id,
@@ -489,9 +509,19 @@ export function createRenderJobServer({
             createdAt: new Date().toISOString(),
             manifest: body.manifest,
             assetMap: body.assetMap,
+            ...(body.idempotencyKey ? { idempotencyKey: body.idempotencyKey } : {}),
           };
-          await persistJob(job);
+          // Publish the in-memory reservation before the first await. A
+          // concurrent request with the same scoped key will find this job
+          // while its durable record is being written and will not enqueue a
+          // second render.
           jobs.set(id, job);
+          try {
+            await persistJob(job);
+          } catch (error) {
+            jobs.delete(id);
+            throw error;
+          }
           queue.push(job);
           enqueued = true;
           pendingSubmissions -= 1;
