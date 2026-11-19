@@ -1360,7 +1360,9 @@ test("render submission idempotency deduplicates concurrent and recovered reques
       const concurrentResult = await concurrent.json();
       assert.equal(concurrentResult.id, firstResult.id);
       firstId = firstResult.id;
-      assert.equal((await waitForFailedJob(instance.base, firstId)).status, "failed");
+      const failedJob = await waitForFailedJob(instance.base, firstId);
+      assert.equal(failedJob.status, "failed");
+      assert.equal("idempotencyKey" in failedJob, false);
     } finally {
       await instance.close();
     }
