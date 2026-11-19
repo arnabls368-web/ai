@@ -1063,3 +1063,27 @@ test("disk-backed asset upload removes its temporary file when private storage f
     }
   });
 });
+
+
+test("staged asset range reads require the dedicated signed asset:read scope", async () => {
+  await withWorkRoot(async (workRoot) => {
+    const instance = await startSignedServer(workRoot);
+    try {
+      const noAuth = await fetch(`${instance.base}/assets/video-1/mp4`, {
+        headers: { range: "bytes=0-2" },
+      });
+      assert.equal(noAuth.status, 401);
+      const wrongScope = await fetch(`${instance.base}/assets/video-1/mp4`, {
+        headers: { ...signedHeader("tenant-a", "project-a", "render:read"), range: "bytes=0-2" },
+      });
+      assert.equal(wrongScope.status, 401);
+      const invalidRange = await fetch(`${instance.base}/assets/video-1/mp4`, {
+        headers: { ...signedHeader("tenant-a", "project-a", "asset:read"), range: "bytes=0-" },
+      });
+      assert.equal(invalidRange.status, 400);
+      assert.match((await invalidRange.json()).error, /explicit byte range/);
+    } finally {
+      await instance.close();
+    }
+  });
+});
