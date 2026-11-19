@@ -94,9 +94,9 @@ function signedRequest({ method, key, body, contentType, payloadHash: suppliedPa
   });
 }
 
-function objectKey(tenantId, projectId, assetId, extension) {
+function objectKey(tenantId, projectId, assetId, extension, prefix = "assets") {
   const digest = createHash("sha256").update(assetId).digest("hex");
-  return "assets/" + tenantId + "/" + projectId + "/" + digest + extension;
+  return prefix + "/" + tenantId + "/" + projectId + "/" + digest + extension;
 }
 
 export function extensionForMime(mimeType) {
@@ -124,7 +124,7 @@ export async function putPrivateAsset({ tenantId, projectId, assetId, mimeType, 
 }
 
 
-export async function putPrivateAssetFile({ tenantId, projectId, assetId, mimeType, filePath }) {
+export async function putPrivateAssetFile({ tenantId, projectId, assetId, mimeType, filePath, prefix = "assets" }) {
   const extension = extensionForMime(mimeType);
   if (!extension) throw new Error("Unsupported asset media type.");
   const info = await stat(filePath);
@@ -134,7 +134,7 @@ export async function putPrivateAssetFile({ tenantId, projectId, assetId, mimeTy
   const digest = createHash("sha256");
   for await (const chunk of createReadStream(filePath)) digest.update(chunk);
   const sha256 = digest.digest("hex");
-  const key = objectKey(tenantId, projectId, assetId, extension);
+  const key = objectKey(tenantId, projectId, assetId, extension, prefix);
   const response = await signedRequest({
     method: "PUT",
     key,
@@ -191,7 +191,7 @@ export async function getPrivateAsset({ tenantId, projectId, assetId, extension 
  * Fetch one bounded byte range without buffering the object in renderer memory.
  * The caller owns and must consume or cancel the returned response body.
  */
-export async function getPrivateAssetRange({ tenantId, projectId, assetId, extension, start, end }) {
+export async function getPrivateAssetRange({ tenantId, projectId, assetId, extension, start, end, prefix = "assets" }) {
   if (!/^\.(?:mp4|mov|m4v|webm|mkv)$/i.test(extension)) {
     throw new Error("Unsupported staged video extension.");
   }
@@ -201,7 +201,7 @@ export async function getPrivateAssetRange({ tenantId, projectId, assetId, exten
   }
   const response = await signedRequest({
     method: "GET",
-    key: objectKey(tenantId, projectId, assetId, extension),
+    key: objectKey(tenantId, projectId, assetId, extension, prefix),
     range: `bytes=${start}-${end}`,
   });
   if (response.status === 404) {
@@ -233,13 +233,13 @@ export const MAX_ASSET_BYTES_LIMIT = MAX_ASSET_BYTES;
 
 
 /** Delete a tenant/project-scoped private staged asset. Missing objects are already clean. */
-export async function deletePrivateAsset({ tenantId, projectId, assetId, extension }) {
+export async function deletePrivateAsset({ tenantId, projectId, assetId, extension, prefix = "assets" }) {
   if (typeof extension !== "string" || ![".mp4", ".mov", ".m4v", ".webm", ".mkv"].includes(extension.toLowerCase())) {
     throw new Error("Unsupported staged video extension.");
   }
   const response = await signedRequest({
     method: "DELETE",
-    key: objectKey(tenantId, projectId, assetId, extension),
+    key: objectKey(tenantId, projectId, assetId, extension, prefix),
   });
   if (!response.ok && response.status !== 404) {
     const status = response.status;
