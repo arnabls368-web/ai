@@ -360,6 +360,11 @@ export function createRenderJobServer({
           await deletePrivateAsset({ tenantId: claims.tenantId, projectId: claims.projectId, assetId: assetDeleteMatch[1], extension: "." + assetDeleteMatch[2], prefix: "staged-assets" });
           return json(response, 200, { deleted: true });
         } catch (error) {
+          // Once streaming headers are sent, a JSON error response is no longer valid.
+          if (response.headersSent) {
+            response.destroy();
+            return;
+          }
           if (error.status === 403 || error.status === 404) {
             return json(response, 404, { error: "staged asset not found" });
           }
