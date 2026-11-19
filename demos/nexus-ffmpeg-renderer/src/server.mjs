@@ -176,7 +176,7 @@ export function createRenderJobServer({
               !id || id.length > 128 || typeof file !== "string" || !file || file.length > 512 || file.includes("\0")) ||
             !((record.tenantId === null && record.projectId === null) ||
               (typeof record.tenantId === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(record.tenantId) &&
-               typeof record.projectId === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(record.projectId))) {
+               typeof record.projectId === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(record.projectId)))) {
           continue;
         }
         validateManifest(record.manifest, record.assetMap);
