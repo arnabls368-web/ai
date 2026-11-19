@@ -159,7 +159,7 @@ export function registerProviderTools(server: McpServer) {
     {
       description: "Estimate fal.ai cost for one endpoint using historical per-call pricing or a known number of billing units. Read-only; does not submit a generation. Estimates are advisory, not guaranteed charges.",
       inputSchema: z.object({
-        endpointId: z.string().min(3).max(200).regex(/^[a-z0-9][a-z0-9._-]*(\\/[a-z0-9][a-z0-9._-]*){1,4}$/i),
+        endpointId: z.string().min(3).max(200).regex(/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*){1,4}$/i),
         estimateType: z.enum(["historical_api_price", "unit_price"]).default("historical_api_price"),
         callQuantity: z.number().int().min(1).max(100000).optional(),
         unitQuantity: z.number().positive().max(100000000).optional(),
