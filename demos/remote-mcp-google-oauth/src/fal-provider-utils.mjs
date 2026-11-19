@@ -12,3 +12,21 @@ export function trustedFalUrl(value) {
   }
   return url.toString();
 }
+
+export function validateFalJobRecord(job, expectedRequestId) {
+  if (!job || typeof job !== "object" || Array.isArray(job) ||
+      job.requestId !== expectedRequestId ||
+      typeof job.endpointId !== "string" ||
+      !/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*){1,4}$/i.test(job.endpointId) ||
+      typeof job.statusUrl !== "string" ||
+      typeof job.responseUrl !== "string") {
+    throw new Error("The saved fal.ai job record is invalid; refusing to contact the provider.");
+  }
+  return {
+    endpointId: job.endpointId,
+    requestId: job.requestId,
+    statusUrl: trustedFalUrl(job.statusUrl),
+    responseUrl: trustedFalUrl(job.responseUrl),
+    createdAt: typeof job.createdAt === "string" ? job.createdAt : "",
+  };
+}
