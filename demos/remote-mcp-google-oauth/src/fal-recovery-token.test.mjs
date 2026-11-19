@@ -11,7 +11,7 @@ const now = Math.floor(Date.now() / 1000);
 
 test("creates and verifies a recovery token for the exact account and fal job", async () => {
   const token = await createFalRecoveryToken(apiKey, scopeA, endpointId, requestId, now + 3600);
-  assert.match(token, /^v1\.1800003600\.[0-9a-f]{64}$/);
+  assert.match(token, new RegExp("^v1\\.\\d{1,12}\\.[0-9a-f]{64}$"));
   assert.equal(await verifyFalRecoveryToken(apiKey, scopeA, endpointId, requestId, token, now), true);
 });
 
