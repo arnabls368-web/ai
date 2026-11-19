@@ -10,6 +10,9 @@ permissions:
 
 jobs:
   deploy:
+    # workflow_dispatch can be launched against a selected ref. Restrict the
+    # production credential-bearing job to the protected default branch.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     defaults:
       run:
